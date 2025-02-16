@@ -312,7 +312,7 @@ def main() -> None:
         "training": {
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs": 2,
+            "num_epochs": 100,
             "checkpoint_dir": os.path.abspath('./data/checkpoints/'),
             "data_dir": "./data",
         },
