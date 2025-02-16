@@ -7,7 +7,7 @@ authors = [{ name = "enpasos", email = "matthias.unverzagt@enpasos.ai" }]
 readme = "README.md"
 requires-python = ">=3.12,<4"
 dependencies = [
-    "jax[extras-cuda]==0.5.0; extra == 'cuda'",
+    "jax[cuda12] (>=0.5.0,<0.6.0)",
     "flax==0.10.3",
     "ml_dtypes==0.5.1",
     "optax==0.2.4",
