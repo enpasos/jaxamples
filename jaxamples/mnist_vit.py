@@ -312,7 +312,7 @@ def main() -> None:
         "training": {
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs": 1000,
+            "num_epochs": 2,
             "checkpoint_dir": os.path.abspath('./data/checkpoints/'),
             "data_dir": "./data",
         },
@@ -324,17 +324,18 @@ def main() -> None:
             "num_heads": 8,
             "mlp_dim": 512,
             "num_classes": 10,
-            "dropout_rate": 0.2
+            "dropout_rate": 0.5
         },
         "onnx":    {
-            "model_file_name": "mnist_vit.onnx",
-            "output_patch": "./docs/mnist_vit.onnx",
+            "model_file_name": "mnist_vit_model.onnx",
+            "output_path": "docs/mnist_vit_model.onnx",
             "input_shapes": [(1, 28, 28, 1)],
             "params": {
                 "pre_transpose": [(0, 3, 1, 2)],  # Convert JAX → ONNX
             },
         }
     }
+
 
     # Set up the model's RNG using the top-level seed.
     config["model"]["rngs"] = nnx.Rngs(config["seed"])
@@ -372,6 +373,7 @@ def main() -> None:
     from jax2onnx.to_onnx import to_onnx
 
     config["onnx"]["component"] = model
+    print("Exporting model to ONNX...")
     to_onnx(**config["onnx"])
 
 if __name__ == "__main__":
