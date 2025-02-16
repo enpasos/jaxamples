@@ -1,0 +1,7 @@
+#!/bin/sh
+cd "$HOME/projects/jaxamples"
+. "$HOME/.cache/pypoetry/virtualenvs/jaxamples-1SCirwN1-py3.12/bin/activate"
+exec python3 $*
+
+
+

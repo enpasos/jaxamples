@@ -1,0 +1,277 @@
+# file: tests/test_mnist_vit.py
+
+import pytest
+import torch
+from torch.utils.data import DataLoader
+import jax.numpy as jnp
+import numpy as np  # Import numpy
+
+import jax
+from jax import random  # for random
+import os  # for save/load model tests
+
+# Import the functions to be tested from your main file:
+from jax_flax import p0013 as mnist_vit  # Use a reasonable alias.
+
+from flax import nnx  # Import flax
+
+# Fixture for a small, deterministic dataset. Avoids downloading MNIST during tests.
+@pytest.fixture
+def dummy_dataset():
+    images = jnp.ones((10, 28, 28, 1), dtype=jnp.float32)  # Example: 10 images
+    labels = jnp.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype=jnp.int32)
+    return {'image': images, 'label': labels}
+
+# Fixture for a single dummy image.
+@pytest.fixture
+def dummy_image():
+    image = jnp.zeros((28, 28, 1))
+    image = image.at[10:18, 10:18].set(1.0)  # Create a white square
+    return image
+
+from torch.utils.data import TensorDataset, DataLoader
+import torch
+
+def get_dummy_dataloaders(batch_size: int):
+    # Create a small dummy dataset (e.g., 10 images)
+    images = torch.ones(10, 1, 28, 28, dtype=torch.float32)
+    labels = torch.arange(10, dtype=torch.int64) % 10
+    dataset = TensorDataset(images, labels)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    return dataloader, dataloader  # Using same dataloader for train and test in the dummy case
+
+# TESTED
+def test_get_dataset_torch_dataloaders():
+    batch_size = 32  # Use a smaller batch size for testing
+    train_dataloader, test_dataloader = mnist_vit.get_dataset_torch_dataloaders(batch_size)
+
+    # Check types
+    assert isinstance(train_dataloader, DataLoader)
+    assert isinstance(test_dataloader, DataLoader)
+
+    # Check batch sizes and shapes for the *training* loader
+    for batch in train_dataloader:
+        images, labels = batch
+        assert images.shape == (batch_size, 1, 28, 28)
+        assert labels.shape == (batch_size,)
+        assert images.dtype == torch.float32
+        assert labels.dtype == torch.int64
+        break  # Only check the first batch
+
+    # Check batch sizes and shapes for the *test* loader.
+    for batch in test_dataloader:
+        images, labels = batch
+        assert images.shape == (batch_size, 1, 28, 28)
+        assert labels.shape == (batch_size,)
+        assert images.dtype == torch.float32
+        assert labels.dtype == torch.int64
+        break  # Only check the first batch
+
+    print("get_dataset_torch_dataloaders test: PASSED")
+
+# TESTED
+def test_jax_collate():
+    # Create a dummy PyTorch batch (what DataLoader would return).
+    dummy_torch_images = torch.randn(4, 1, 28, 28)
+    dummy_torch_labels = torch.randint(0, 10, (4,), dtype=torch.int64)
+    dummy_batch = (dummy_torch_images, dummy_torch_labels)
+
+    # Collate it.
+    jax_batch = mnist_vit.jax_collate(dummy_batch)
+
+    # Check shapes and types.
+    assert jax_batch['image'].shape == (4, 28, 28, 1)
+    assert jax_batch['image'].dtype == jnp.float32
+    assert jax_batch['label'].shape == (4,)
+    assert jax_batch['label'].dtype == jnp.int32
+
+    # Check values (using allclose for float comparison)
+    assert np.array_equal(jax_batch['image'], jnp.transpose(dummy_torch_images.numpy(), (0, 2, 3, 1)))
+    assert np.array_equal(jax_batch['label'], dummy_torch_labels.numpy())
+    print("jax_collate test: PASSED")
+
+# TESTED
+def test_rotate_image(dummy_image):
+    rotated_image = mnist_vit.rotate_image(dummy_image, 45.0)
+    assert rotated_image.shape == (28, 28, 1)
+    assert rotated_image.dtype == jnp.float32
+
+    # Instead of comparing sums, check that *some* pixels have changed.
+    assert not jnp.allclose(dummy_image, rotated_image), "Image should be different after rotation"
+
+    # Check for non-zero values near where the rotated square *should* be.
+    rotated_np = np.array(rotated_image)  # Convert to NumPy for easier slicing/indexing
+    center = 14
+    radius = 5
+    rotated_region_sum = rotated_np[center-radius:center+radius, center-radius:center+radius, 0].sum()
+    assert rotated_region_sum > 1.0, "Rotated region should have significant non-zero values"
+
+    # And check a region *away* from the rotated square that should be near-zero.
+    corner_sum = rotated_np[0:5, 0:5, 0].sum()
+    assert corner_sum < 1.0, "Corner region should be mostly zeros"
+
+    print("rotate_image test: PASSED")
+
+# TESTED
+def test_augment_data_batch(dummy_dataset):
+    rng_key = random.PRNGKey(123)
+    augmented_batch = mnist_vit.augment_data_batch(dummy_dataset, rng_key)
+
+    # Check shapes and types
+    assert augmented_batch['image'].shape == dummy_dataset['image'].shape
+    assert augmented_batch['image'].dtype == jnp.float32
+    assert augmented_batch['label'].shape == dummy_dataset['label'].shape
+    assert augmented_batch['label'].dtype == jnp.int32
+
+    # Check that the augmented images are different from the originals
+    assert not jnp.allclose(augmented_batch['image'], dummy_dataset['image'])
+    print("augment_data_batch test: PASSED")
+
+# TESTED
+def test_create_sinusoidal_embeddings():
+    num_patches = 16
+    num_hiddens = 128
+    embeddings = mnist_vit.create_sinusoidal_embeddings(num_patches, num_hiddens)
+    assert embeddings.shape == (1, num_patches + 1, num_hiddens)
+    assert embeddings.dtype == jnp.float32
+    assert not jnp.allclose(embeddings[0, 0, :], embeddings[0, 1, :])
+    print("create_sinusoidal_embeddings test: PASSED")
+
+def test_create_optimizer():
+    rngs = nnx.Rngs(0)
+    model = mnist_vit.VisionTransformer(28, 28,   128, 6, 8, 256, 10,  0.1, rngs=rngs)
+
+    learning_rate = 0.01
+    weight_decay = 0.001
+
+    optimizer = mnist_vit.create_optimizer(model, learning_rate, weight_decay)
+    # No assert; just ensure no errors are raised.
+    print("create_optimizer test: PASSED")
+
+def test_loss_fn():
+    rngs = nnx.Rngs(0)
+    batch_size = 4
+    num_classes = 10
+    model = mnist_vit.VisionTransformer(28, 28,  128, 6, 8, 256, num_classes, 0.1, rngs=rngs)
+
+    images = jnp.ones((batch_size, 28, 28, 1))
+    labels = jnp.array([0, 1, 2, 3], dtype=jnp.int32)
+    batch = {'image': images, 'label': labels}
+
+    loss, logits = mnist_vit.loss_fn(model, batch)
+    assert loss.shape == ()
+    assert loss.dtype == jnp.float32
+    assert logits.shape == (batch_size, num_classes)
+    assert logits.dtype == jnp.float32
+    print("loss_fn test: PASSED")
+
+def test_train_step():
+    rngs = nnx.Rngs(0)
+    batch_size = 4
+    num_classes = 10
+    model = mnist_vit.VisionTransformer(28, 28,  128, 6, 8, 256, num_classes,   0.1, rngs=rngs)
+    # Removed unused initialization of model_state.
+    optimizer = mnist_vit.create_optimizer(model, learning_rate=0.01, weight_decay=0.0001)
+    metrics = nnx.MultiMetric(accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average('loss'))
+
+    images = jnp.ones((batch_size, 28, 28, 1))
+    labels = jnp.array([0, 1, 2, 3], dtype=jnp.int32)
+    batch = {'image': images, 'label': labels}
+    learning_rate = 0.01
+    weight_decay = 1e-4
+
+    mnist_vit.train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
+    print("train_step test: PASSED")
+
+def test_eval_step():
+    rngs = nnx.Rngs(0)
+    batch_size = 4
+    num_classes = 10
+    model = mnist_vit.VisionTransformer(28, 28,   128, 6, 8, 256, num_classes,   0.1, rngs=rngs)
+
+    metrics = nnx.MultiMetric(accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average('loss'))
+
+    images = jnp.ones((batch_size, 28, 28, 1))
+    labels = jnp.array([0, 1, 2, 3], dtype=jnp.int32)
+    batch = {'image': images, 'label': labels}
+
+    mnist_vit.eval_step(model, metrics, batch)
+    print("eval_step test: PASSED")
+
+def test_pred_step():
+    rngs = nnx.Rngs(0)
+    batch_size = 4
+    num_classes = 10
+    model = mnist_vit.VisionTransformer(28, 28,   128, 6, 8, 256, num_classes,   0.1, rngs=rngs)
+
+    images = jnp.ones((batch_size, 28, 28, 1))
+    batch = {'image': images, 'label': jnp.zeros((batch_size,), dtype=jnp.int32)}
+
+    predictions = mnist_vit.pred_step(model, batch)  # Pass model
+    assert predictions.shape == (batch_size,)
+    assert predictions.dtype == jnp.dtype('int32')
+    print("pred_step test: PASSED")
+
+def test_train_model():
+    rngs = nnx.Rngs(0)
+    batch_size = 4
+    num_classes = 10
+    # Create dummy model
+    dummy_model = mnist_vit.VisionTransformer(28, 28,   128, 6, 8, 256, num_classes,   0.1, rngs=rngs)
+
+    metrics = nnx.MultiMetric(
+        accuracy=nnx.metrics.Accuracy(),
+        loss=nnx.metrics.Average('loss'),
+    )
+
+    # Use dummy dataloaders instead of the full MNIST dataset.
+    train_dataloader, test_dataloader = get_dummy_dataloaders(batch_size)
+
+    rng_key = jax.random.PRNGKey(0)
+    # Create a dummy config dictionary required by train_model.
+    config = {
+        "training": {
+            "base_learning_rate": 0.0001,
+            "num_epochs": 2,  # Use 2 epochs for testing.
+            "checkpoint_dir": os.path.abspath('./data/test_checkpoints/'),
+            "batch_size": batch_size,
+            "data_dir": "./data"
+        }
+    }
+    metrics_history = mnist_vit.train_model(dummy_model, 0, metrics, config, train_dataloader, test_dataloader, rng_key)
+
+    # Check that metrics_history is a dict and that training loss decreases.
+    assert isinstance(metrics_history, dict)
+    assert metrics_history['train_loss'][-1] < metrics_history['train_loss'][0], "Loss did not decrease"
+    print("train_model test: PASSED")
+
+import tempfile
+
+def test_save_and_load_model():
+    # 1. Create a dummy model.
+    rngs = nnx.Rngs(0)
+    model = mnist_vit.VisionTransformer(28, 28,   128, 6, 8, 256, 10,   0.1, rngs=rngs)
+
+    # 2. Create a temporary directory for the checkpoint.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        ckpt_dir = temp_dir  # Use temp_dir directly
+
+        # 3. Save the model.
+        mnist_vit.save_model(model, ckpt_dir, epoch=1)
+
+        # Check that the zip file was created.
+        assert os.path.exists(os.path.join(ckpt_dir, "epoch_1.zip"))
+
+        # 4. Create a *new* model instance (to simulate loading into a fresh model).
+        model2 = mnist_vit.VisionTransformer(28, 28,  128, 6, 8, 256, 10,   0.1, rngs=nnx.Rngs(0))
+        # 5. Load the model state.
+        loaded_model_state = mnist_vit.load_model(model2, ckpt_dir, epoch=1, seed=0)
+
+        # Verify that the state was loaded correctly by comparing the *values* of the parameters.
+        # Here we replace the ellipsis with an empty dictionary.
+        original_state = nnx.state(model, nnx.RngKey, ...)
+        loaded_state = nnx.state(model2, nnx.RngKey, ...)
+
+        trees_are_equal = jax.tree_util.tree_map(lambda x, y: jnp.allclose(x, y, atol=1e-6), original_state, loaded_state)
+        assert jax.tree_util.tree_all(trees_are_equal), "Loaded state does not match saved state."
+        print("test_save_and_load_model: PASSED")
