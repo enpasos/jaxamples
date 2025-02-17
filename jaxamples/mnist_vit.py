@@ -201,7 +201,7 @@ def train_model(model: nnx.Module, start_epoch: int, metrics: nnx.MultiMetric,
         metrics.reset()
         for batch in train_dataloader:
             batch = jax_collate(batch)
-            epoch_rng_key, dropout_rng = random.split(epoch_rng_key)
+            epoch_rng_key, dropout_rng = random.split( rng_key)
             batch = augment_data_batch(batch, dropout_rng)
             train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
         for metric, value in metrics.compute().items():
