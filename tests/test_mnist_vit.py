@@ -11,7 +11,7 @@ from jax import random  # for random
 import os  # for save/load model tests
 
 # Import the functions to be tested from your main file:
-from jax_flax import p0013 as mnist_vit  # Use a reasonable alias.
+from jaxamples import  mnist_vit
 
 from flax import nnx  # Import flax
 
@@ -232,7 +232,9 @@ def test_train_model():
     config = {
         "training": {
             "base_learning_rate": 0.0001,
-            "num_epochs": 2,  # Use 2 epochs for testing.
+            "start_epoch": 0,
+            "num_epochs_to_train_now": 2,
+            "warmup_epochs": 0,
             "checkpoint_dir": os.path.abspath('./data/test_checkpoints/'),
             "batch_size": batch_size,
             "data_dir": "./data"
