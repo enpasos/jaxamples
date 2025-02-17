@@ -32,7 +32,8 @@ matplotlib = "==3.10.0"
 
 
 [tool.poetry.dependencies]
-jax2onnx = {source = "testpypi"}
+jax2onnx = { source = "testpypi" }
+
 [tool.poetry]
 packages = [
     { include = "jaxamples" }

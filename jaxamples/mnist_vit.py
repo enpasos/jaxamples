@@ -116,6 +116,7 @@ def loss_fn(model: nnx.Module, batch: Dict[str, jnp.ndarray], deterministic: boo
 @nnx.jit
 def train_step(model: nnx.Module, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric,
                batch: Dict[str, jnp.ndarray], learning_rate: float, weight_decay: float):
+    model.train()
     grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
     (loss, logits), grads = grad_fn(model, batch)
     metrics.update(loss=loss, logits=logits, labels=batch['label'])
@@ -123,11 +124,13 @@ def train_step(model: nnx.Module, optimizer: nnx.Optimizer, metrics: nnx.MultiMe
 
 @nnx.jit
 def eval_step(model: nnx.Module, metrics: nnx.MultiMetric, batch: Dict[str, jnp.ndarray]):
+    model.eval()
     loss, logits = loss_fn(model, batch, deterministic=True)
     metrics.update(loss=loss, logits=logits, labels=batch['label'])
 
 @nnx.jit
 def pred_step(model: nnx.Module, batch: Dict[str, jnp.ndarray]) -> jnp.ndarray:
+    model.eval()
     logits = model(batch['image'], deterministic=True)
     return jnp.argmax(logits, axis=1)
 
@@ -187,6 +190,8 @@ def train_model(model: nnx.Module, start_epoch: int, metrics: nnx.MultiMetric,
                 rng_key: jnp.ndarray) -> Dict[str, list]:
     metrics_history = {'train_loss': [], 'train_accuracy': [], 'test_loss': [], 'test_accuracy': []}
     optimizer = create_optimizer(model, config["training"]["base_learning_rate"], 1e-4)
+
+
 
     for epoch in range(start_epoch, start_epoch + config["training"]["num_epochs"]):
         rng_key, epoch_rng_key = random.split(rng_key)
