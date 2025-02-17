@@ -173,10 +173,10 @@ def visualize_incorrect_classifications(model: nnx.Module, test_dataloader: Data
 # =============================================================================
 
 def lr_schedule(epoch: int, config: Dict) -> float:
-    num_epochs = config["training"]["num_epochs"]
+    total_epochs = config["training"]["start_epoch"] + config["training"]["num_epochs_to_train_now"]
     base_lr = config["training"]["base_learning_rate"]
-    # Simple cosine schedule over the entire training period (no warmup)
-    return 0.5 * base_lr * (1 + jnp.cos(jnp.pi * epoch / num_epochs))
+    # Cosine schedule computed over the full training duration
+    return 0.5 * base_lr * (1 + jnp.cos(jnp.pi * epoch / total_epochs))
 
 def create_optimizer(model: nnx.Module, learning_rate: float, weight_decay: float) -> nnx.Optimizer:
     return nnx.Optimizer(model, optax.adamw(learning_rate=learning_rate, weight_decay=weight_decay))
@@ -193,8 +193,7 @@ def train_model(model: nnx.Module, start_epoch: int, metrics: nnx.MultiMetric,
 
 
 
-    for epoch in range(start_epoch, start_epoch + config["training"]["num_epochs"]):
-        rng_key, epoch_rng_key = random.split(rng_key)
+    for epoch in range(start_epoch, start_epoch + config["training"]["num_epochs_to_train_now"]):
         learning_rate = lr_schedule(epoch, config)
         print(f"Epoch: {epoch}, Learning rate: {learning_rate}")
         weight_decay = min(1e-4, learning_rate / 10)
@@ -317,7 +316,8 @@ def main() -> None:
         "training": {
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs": 100,
+            "num_epochs_to_train_now": 100,
+            "warmup_epochs": 0,
             "checkpoint_dir": os.path.abspath('./data/checkpoints/'),
             "data_dir": "./data",
         },
@@ -353,6 +353,7 @@ def main() -> None:
     rng_key = rngs.as_jax_rng()
 
     start_epoch = get_latest_checkpoint_epoch(config["training"]["checkpoint_dir"])
+    config["training"]["start_epoch"] = start_epoch
     print(f"Resuming from epoch: {start_epoch}.")
 
     # Create the model using parameters from the config.
@@ -373,7 +374,7 @@ def main() -> None:
     )
 
     metrics_history = train_model(model, start_epoch, metrics, config, train_dataloader, test_dataloader, rng_key)
-    visualize_results(metrics_history, model, test_dataloader, start_epoch + config["training"]["num_epochs"] - 1)
+    visualize_results(metrics_history, model, test_dataloader, start_epoch + config["training"]["num_epochs_to_train_now"] - 1)
 
     from jax2onnx.to_onnx import to_onnx
 
