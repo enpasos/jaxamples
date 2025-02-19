@@ -313,8 +313,11 @@ def train_model(
             batch = jax_collate(batch)
             _, dropout_rng = random.split(rng_key)
             batch = augment_data_batch(batch, dropout_rng)
-            visualize_augmented_images(batch, epoch, num_images=9)
             train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
+        
+        # Visualize augmented images once per epoch
+        visualize_augmented_images(batch, epoch, num_images=9)
+
         for metric, value in metrics.compute().items():
             metrics_history[f"train_{metric}"].append(value.item())
         print(
