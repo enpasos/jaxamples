@@ -425,14 +425,14 @@ pyreadline3 = {version = "*", markers = "sys_platform == \"win32\" and python_ve
 
 [[package]]
 name = "humanize"
-version = "4.12.0"
+version = "4.12.1"
 description = "Python humanize utilities"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "humanize-4.12.0-py3-none-any.whl", hash = "sha256:106a7436a2d545d742c147c469716b3a08424aa143a82103630147c489a89f48"},
-    {file = "humanize-4.12.0.tar.gz", hash = "sha256:87ff7b43591370b12a1d103c9405849d911d4b039ed22d80b718b62c76eec8a3"},
+    {file = "humanize-4.12.1-py3-none-any.whl", hash = "sha256:86014ca5c52675dffa1d404491952f1f5bf03b07c175a51891a343daebf01fea"},
+    {file = "humanize-4.12.1.tar.gz", hash = "sha256:1338ba97415c96556758a6e2f65977ed406dddf4620d4c6db9bbdfd07f0f1232"},
 ]
 
 [package.extras]
@@ -564,14 +564,14 @@ with-cuda = ["nvidia-cublas-cu12 (>=12.1.3.1)", "nvidia-cuda-cupti-cu12 (>=12.1.
 
 [[package]]
 name = "jax2onnx"
-version = "0.1.0.dev20250217"
+version = "0.1.0.dev20250219"
 description = "export JAX to ONNX - focus on flax nnx"
 optional = false
 python-versions = ">=3.12,<4"
 groups = ["main"]
 files = [
-    {file = "jax2onnx-0.1.0.dev20250217-py3-none-any.whl", hash = "sha256:f466b0a5db6b4df88e05baf646816d259078091a111612c5c8a9710a5e318f22"},
-    {file = "jax2onnx-0.1.0.dev20250217.tar.gz", hash = "sha256:324a0a9a93aa7ae3dd25f220aeea73db1e377ad72e2386bf84c8f2902e6c1ac9"},
+    {file = "jax2onnx-0.1.0.dev20250219-py3-none-any.whl", hash = "sha256:a3f9fadd6c6a2e3a5e98ddec3f08080150809175472020b4045356315758f2c3"},
+    {file = "jax2onnx-0.1.0.dev20250219.tar.gz", hash = "sha256:8ce1bdaa023c2e0af90875c77ca07307d94f009829261aeb5520cbf775208e37"},
 ]
 
 [package.dependencies]
@@ -2338,14 +2338,14 @@ scipy = ["scipy"]
 
 [[package]]
 name = "treescope"
-version = "0.1.8"
+version = "0.1.9"
 description = "Treescope: An interactive HTML pretty-printer for ML research in IPython notebooks."
 optional = false
 python-versions = ">=3.10"
 groups = ["main", "test"]
 files = [
-    {file = "treescope-0.1.8-py3-none-any.whl", hash = "sha256:56637aed9946834a62cca41eafd812b92df6119a6b6c16990d9e0f47a6a971d8"},
-    {file = "treescope-0.1.8.tar.gz", hash = "sha256:6a81bac3dccf84a8a8635fe43531e28c2c7e4ffbf571693259e54b9329612633"},
+    {file = "treescope-0.1.9-py3-none-any.whl", hash = "sha256:68677013a9f0228212fccf835f3fb037be07ae8b4c5f6f58eefab11198f83cf7"},
+    {file = "treescope-0.1.9.tar.gz", hash = "sha256:ba6cdbdc9c5b52691d5f3bb4c5d5c7daa5627119acac8640b46d37e6aabe63a6"},
 ]
 
 [package.dependencies]
@@ -2355,7 +2355,7 @@ numpy = ">=1.25.2"
 dev = ["ipython", "jupyter", "pyink (>=24.3.0)", "pylint (>=2.6.0)", "pytest (>=8.2.2)", "pytype"]
 docs = ["ipython", "ipython (>=8.8.0)", "jax[cpu] (>=0.4.23)", "matplotlib (>=3.5.0)", "myst-nb (>=1.0.0)", "myst-parser (>=3.0.1)", "packaging (==24.1)", "palettable (==3.3.3)", "pandas (==2.2.2)", "penzai (>=0.2.4,<0.3.0)", "plotly (==5.22.0)", "sphinx (>=6.0.0,<7.3.0)", "sphinx-book-theme (>=1.0.1)", "sphinx-hoverxref", "sphinx_contributors", "sphinxcontrib-katex", "torch (==2.3.1)"]
 notebook = ["ipython", "jax (>=0.4.23)", "palettable"]
-test = ["absl-py (>=1.4.0)", "jax (>=0.4.23)", "pytest (>=8.2.2)", "torch (>=2.0.0)"]
+test = ["absl-py (>=1.4.0)", "jax (>=0.4.23)", "omegaconf (>=2.0.0)", "pydantic (>=2.0.0)", "pytest (>=8.2.2)", "torch (>=2.0.0)"]
 
 [[package]]
 name = "triton"

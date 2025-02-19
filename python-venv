@@ -1,7 +1,6 @@
 #!/bin/sh
-cd "$HOME/projects/jaxamples"
-. "$HOME/.cache/pypoetry/virtualenvs/jaxamples-1SCirwN1-py3.12/bin/activate"
-exec python3 $*
-
-
+cd "/home/enpasos/projects/jax2onnx"
+VENV_PATH=$(poetry env info --path)
+. "/home/enpasos/.cache/pypoetry/virtualenvs/jaxamples-1SCirwN1-py3.12/bin/activate"
+exec python3 "$@"
 
