@@ -464,7 +464,10 @@ def main() -> None:
             "num_heads": 8,
             "mlp_dim": 512,
             "num_classes": 10,
-            "dropout_rate": 0.8,
+            "dropout_rate": 0.5,
+            "embed_dims": [16, 64, 256],
+            "kernel_size": 3,
+            "strides": [1, 2, 2]
         },
         "onnx": {
             "model_file_name": "mnist_vit_model.onnx",
