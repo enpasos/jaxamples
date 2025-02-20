@@ -6,6 +6,7 @@ import shutil
 import zipfile
 import warnings
 from typing import Dict, Tuple, List, Any
+from collections import namedtuple
 
 import jax
 import jax.numpy as jnp
@@ -16,6 +17,8 @@ import treescope
 from flax import nnx
 from jax import random
 from jax.image import scale_and_translate
+
+# from scipy.ndimage import gaussian_filter  # Corrected import
 from jax.scipy.ndimage import map_coordinates
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -86,6 +89,43 @@ def rotate_image(image: jnp.ndarray, angle: float) -> jnp.ndarray:
     return jnp.expand_dims(rotated_image, axis=-1)
 
 
+# import functools
+
+
+# @functools.partial(jax.jit, static_argnames=("alpha", "sigma", "x_grid", "y_grid"))
+# def elastic_deform(
+#         image: jnp.ndarray,
+#         alpha: float,
+#         sigma: float,
+#         rng_key: jnp.ndarray,
+#         x_grid: jnp.ndarray,
+#         y_grid: jnp.ndarray,
+# ) -> jnp.ndarray:
+#     """Applies elastic deformation to an image using a Gaussian filter.
+#
+#     Args:
+#         image: The input image (HWC).
+#         alpha: Scaling factor for the deformation.
+#         sigma: Standard deviation of the Gaussian filter.
+#         rng_key: JAX PRNG key for random number generation.
+#         x_grid: Precomputed x-coordinates meshgrid.
+#         y_grid: Precomputed y-coordinates meshgrid.
+#
+#     Returns:
+#         The deformed image.
+#     """
+#     shape = image.shape[:2]
+#     dx = random.normal(rng_key, shape) * alpha
+#     dy = random.normal(random.split(rng_key)[0], shape) * alpha
+#
+#     dx = gaussian_filter(np.asarray(dx), sigma)  # No mode or cval needed
+#     dy = gaussian_filter(np.asarray(dy), sigma)
+#
+#     indices = jnp.reshape(y_grid + dy, (-1, 1)), jnp.reshape(x_grid + dx, (-1, 1))
+#     deformed_image = map_coordinates(image[..., 0], indices, order=1, mode="reflect")
+#     return jnp.expand_dims(deformed_image.reshape(shape), axis=-1)
+
+
 def visualize_augmented_images(
     ds: Dict[str, jnp.ndarray], epoch: int, num_images: int = 9
 ) -> None:
@@ -106,24 +146,53 @@ def visualize_augmented_images(
     plt.close(fig)
 
 
+AugmentationParams = namedtuple(
+    "AugmentationParams",
+    [
+        "max_translation",
+        "scale_min_x",
+        "scale_max_x",
+        "scale_min_y",
+        "scale_max_y",
+        "max_rotation",
+        "elastic_alpha",
+        "elastic_sigma",
+    ],
+)
+
+
 @jax.jit
 def augment_data_batch(
-    batch: Dict[str, jnp.ndarray], rng_key: jnp.ndarray
+    batch: Dict[str, jnp.ndarray],
+    rng_key: jnp.ndarray,
+    augmentation_params: AugmentationParams,
 ) -> Dict[str, jnp.ndarray]:
     """Augments a batch of images."""
     images = batch["image"]
     batch_size, height, width, channels = images.shape
 
+    x_grid, y_grid = np.meshgrid(np.arange(width), np.arange(height), indexing="xy")
+    x_grid = jnp.array(x_grid)
+    y_grid = jnp.array(y_grid)
+
     def augment_single_image(image, key):
-        key1, key2, key3, key4, key5 = random.split(key, 5)
-        max_translation = 2.0
+        key1, key2, key3, key4, key5, key6 = random.split(key, 6)
+        max_translation = augmentation_params.max_translation
         tx = random.uniform(key1, minval=-max_translation, maxval=max_translation)
         ty = random.uniform(key2, minval=-max_translation, maxval=max_translation)
         translation = jnp.array([ty, tx])
-        scale_factor_x = random.uniform(key3, minval=0.7, maxval=1.1)
-        scale_factor_y = random.uniform(key4, minval=0.8, maxval=1.1)
+        scale_factor_x = random.uniform(
+            key3,
+            minval=augmentation_params.scale_min_x,
+            maxval=augmentation_params.scale_max_x,
+        )
+        scale_factor_y = random.uniform(
+            key4,
+            minval=augmentation_params.scale_min_y,
+            maxval=augmentation_params.scale_max_y,
+        )
         scale = jnp.array([scale_factor_y, scale_factor_x])
-        max_rotation = 10.0 * (jnp.pi / 180.0)
+        max_rotation = augmentation_params.max_rotation * (jnp.pi / 180.0)
         rotation_angle = random.uniform(key5, minval=-max_rotation, maxval=max_rotation)
         rotated_image = rotate_image(image, jnp.rad2deg(rotation_angle))
         augmented_image = scale_and_translate(
@@ -135,11 +204,24 @@ def augment_data_batch(
             method="linear",
             antialias=True,
         )
+        # augmented_image = elastic_deform(
+        #     augmented_image,
+        #     augmentation_params.elastic_alpha,
+        #     augmentation_params.elastic_sigma,
+        #     key6,
+        #     x_grid,
+        #     y_grid,
+        # )
         return augmented_image
 
     rng_keys = random.split(rng_key, num=batch_size)
     augmented_images = jax.vmap(augment_single_image)(images, rng_keys)
     return {"image": augmented_images, "label": batch["label"]}
+
+
+augment_data_batch = jax.jit(
+    augment_data_batch, static_argnames=["augmentation_params"]
+)
 
 
 def create_sinusoidal_embeddings(num_patches: int, num_hiddens: int) -> jnp.ndarray:
@@ -311,6 +393,7 @@ def train_model(
         "test_accuracy": [],
     }
     optimizer = create_optimizer(model, config["training"]["base_learning_rate"], 1e-4)
+    augmentation_params = AugmentationParams(**config["training"]["augmentation"])
 
     for epoch in range(
         start_epoch, start_epoch + config["training"]["num_epochs_to_train_now"]
@@ -323,7 +406,7 @@ def train_model(
         for batch in train_dataloader:
             batch = jax_collate(batch)
             _, dropout_rng = random.split(rng_key)
-            batch = augment_data_batch(batch, dropout_rng)
+            batch = augment_data_batch(batch, dropout_rng, augmentation_params)
             train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
 
         # Visualize augmented images once per epoch
@@ -473,6 +556,16 @@ def main() -> None:
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
+            "augmentation": {
+                "max_translation": 2.0,
+                "scale_min_x": 0.7,
+                "scale_max_x": 1.1,
+                "scale_min_y": 0.8,
+                "scale_max_y": 1.1,
+                "max_rotation": 15.0,
+                "elastic_alpha": 34.0,
+                "elastic_sigma": 4.0,
+            },
         },
         "model": {
             "height": 28,
