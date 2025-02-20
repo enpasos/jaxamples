@@ -2,13 +2,13 @@
 
 import pytest
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 import jax.numpy as jnp
 import numpy as np  # Import numpy
-
 import jax
 from jax import random  # for random
 import os  # for save/load model tests
+import tempfile  # for save/load model tests
 
 # Import the functions to be tested from your main file:
 from jaxamples import mnist_vit
@@ -30,10 +30,6 @@ def dummy_image():
     image = jnp.zeros((28, 28, 1))
     image = image.at[10:18, 10:18].set(1.0)  # Create a white square
     return image
-
-
-from torch.utils.data import TensorDataset, DataLoader
-import torch
 
 
 def get_dummy_dataloaders(batch_size: int):
@@ -180,7 +176,7 @@ def test_create_optimizer():
     model = create_model()
     learning_rate = 0.01
     weight_decay = 0.001
-    optimizer = mnist_vit.create_optimizer(model, learning_rate, weight_decay)
+    mnist_vit.create_optimizer(model, learning_rate, weight_decay)
     print("create_optimizer test: PASSED")
 
 
@@ -274,9 +270,6 @@ def test_train_model():
     print("train_model test: PASSED")
 
 
-import tempfile
-
-
 def test_save_and_load_model():
     model = create_model()
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -284,7 +277,7 @@ def test_save_and_load_model():
         mnist_vit.save_model(model, ckpt_dir, epoch=1)
         assert os.path.exists(os.path.join(ckpt_dir, "epoch_1.zip"))
         model2 = create_model()
-        loaded_model_state = mnist_vit.load_model(model2, ckpt_dir, epoch=1, seed=0)
+        mnist_vit.load_model(model2, ckpt_dir, epoch=1, seed=0)
         original_state = nnx.state(model, nnx.RngKey, ...)
         loaded_state = nnx.state(model2, nnx.RngKey, ...)
         trees_are_equal = jax.tree_util.tree_map(

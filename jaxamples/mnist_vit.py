@@ -1,34 +1,37 @@
-# file: jax_flax/p0013.py
+# file: jaxamples/mnist_vit.py
 
-import matplotlib
-
-matplotlib.use("Agg")  # Use a non-interactive backend to avoid Tkinter-related issues
-import matplotlib.pyplot as plt
-
+import os
+import re
 import shutil
-from typing import Tuple, Dict
+import zipfile
+import warnings
+from typing import Dict, Tuple, List, Any
 
 import jax
 import jax.numpy as jnp
+from jax import Array
 import optax
 import torchvision
 import treescope
 from flax import nnx
 from jax import random
 from jax.image import scale_and_translate
+from jax.scipy.ndimage import map_coordinates
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import jax2onnx.plugins  # noqa: F401
 from jax2onnx.examples.mnist_vit import VisionTransformer
-import warnings
+import orbax.checkpoint as orbax
+from jax2onnx.to_onnx import to_onnx
+import matplotlib
+
+matplotlib.use("Agg")  # Use a non-interactive backend to avoid Tkinter-related issues
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings(
     "ignore", message="Couldn't find sharding info under RestoreArgs.*"
 )
-from jax.scipy.ndimage import map_coordinates
-import orbax.checkpoint as orbax
-import zipfile
-import os
+
 
 # =============================================================================
 # Data, augmentation and model utility functions
@@ -92,7 +95,6 @@ def visualize_augmented_images(
         ds (Dict[str, jnp.ndarray]): The dataset containing the augmented images.
         num_images (int, optional): The number of images to display. Defaults to 9.
     """
-    import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, num_images, figsize=(15, 5))
     for i, ax in enumerate(axes):
@@ -225,6 +227,7 @@ def visualize_incorrect_classifications(
     # Concatenate all incorrect data
     if incorrect_images:
         incorrect_images = jnp.concatenate(incorrect_images, axis=0)
+        incorrect_images_typed: Array = incorrect_images  # to make mypy happy
         incorrect_labels = jnp.concatenate(incorrect_labels, axis=0)
         incorrect_preds = jnp.concatenate(incorrect_preds, axis=0)
     else:
@@ -248,8 +251,8 @@ def visualize_incorrect_classifications(
     if num_images == 1:
         axes = [axes]  # Ensure axes is iterable for a single subplot
     for i, ax in enumerate(axes):
-        ax.imshow(incorrect_images[i, ..., 0], cmap="gray")
-        ax.set_title(f"{incorrect_labels[i]} but {incorrect_preds[i]}")
+        ax.imshow(incorrect_images_typed[i, ..., 0], cmap="gray")
+        ax.set_title(f"{incorrect_labels[i]}\nbut\n{incorrect_preds[i]}")
         ax.axis("off")
 
     plt.savefig(f"output/incorrect_classifications_epoch{epoch}.png")
@@ -293,7 +296,7 @@ def train_model(
     test_dataloader: DataLoader,
     rng_key: jnp.ndarray,
 ) -> Dict[str, list]:
-    metrics_history = {
+    metrics_history: Dict[str, List[float]] = {
         "train_loss": [],
         "train_accuracy": [],
         "test_loss": [],
@@ -314,7 +317,7 @@ def train_model(
             _, dropout_rng = random.split(rng_key)
             batch = augment_data_batch(batch, dropout_rng)
             train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
-        
+
         # Visualize augmented images once per epoch
         visualize_augmented_images(batch, epoch, num_images=9)
 
@@ -416,9 +419,6 @@ def load_model(model: nnx.Module, ckpt_dir: str, epoch: int, seed: int) -> nnx.M
     return model
 
 
-import re
-
-
 def get_latest_checkpoint_epoch(ckpt_dir: str) -> int:
     ckpt_dir = os.path.abspath(ckpt_dir)
     if not os.path.exists(ckpt_dir):
@@ -446,7 +446,7 @@ def main() -> None:
 
     # Define all configuration parameters in a hierarchical dictionary.
     # "seed" is now at the top level.
-    config = {
+    config: Dict[str, Any] = {
         "seed": 5678,
         "training": {
             "batch_size": 64,
@@ -460,14 +460,14 @@ def main() -> None:
             "height": 28,
             "width": 28,
             "num_hiddens": 256,
-            "num_layers": 6,
-            "num_heads": 8,
-            "mlp_dim": 512,
+            "num_layers": 8,
+            "num_heads": 4,
+            "mlp_dim": 256,
             "num_classes": 10,
             "dropout_rate": 0.5,
-            "embed_dims": [16, 64, 256],
+            "embed_dims": [32, 128, 256],
             "kernel_size": 3,
-            "strides": [1, 2, 2]
+            "strides": [1, 2, 2],
         },
         "onnx": {
             "model_file_name": "mnist_vit_model.onnx",
@@ -523,8 +523,6 @@ def main() -> None:
         test_dataloader,
         start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
     )
-
-    from jax2onnx.to_onnx import to_onnx
 
     config["onnx"]["component"] = model
     print("Exporting model to ONNX...")
