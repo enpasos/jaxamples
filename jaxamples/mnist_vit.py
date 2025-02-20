@@ -24,6 +24,7 @@ from jax2onnx.examples.mnist_vit import VisionTransformer
 import orbax.checkpoint as orbax
 from jax2onnx.to_onnx import to_onnx
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")  # Use a non-interactive backend to avoid Tkinter-related issues
 import matplotlib.pyplot as plt
@@ -287,6 +288,13 @@ def create_optimizer(
 # =============================================================================
 
 
+def compute_mean_and_spread(values: List[float]) -> Tuple[float, float]:
+    """Compute the mean and spread (standard deviation) of a list of values."""
+    mean = np.mean(values)
+    spread = np.std(values)
+    return mean, spread
+
+
 def train_model(
     model: nnx.Module,
     start_epoch: int,
@@ -339,6 +347,16 @@ def train_model(
             f"[test] epoch: {epoch}, loss: {metrics_history['test_loss'][-1]:.4f}, "
             f"accuracy: {metrics_history['test_accuracy'][-1]:.4f}"
         )
+
+        # Compute mean and spread of the accuracy over the last 10 epochs
+        if len(metrics_history["test_accuracy"]) >= 10:
+            recent_accuracies = metrics_history["test_accuracy"][-10:]
+            mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
+            print(
+                f"[test] last 10 epochs mean accuracy: {mean_accuracy:.4f}, "
+                f"spread: {spread_accuracy:.4f}"
+            )
+
         visualize_incorrect_classifications(model, test_dataloader, epoch)
         save_model(model, config["training"]["checkpoint_dir"], epoch)
     return metrics_history
