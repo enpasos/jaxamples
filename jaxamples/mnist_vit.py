@@ -1,5 +1,5 @@
 # file: jaxamples/mnist_vit.py
-
+import functools
 import os
 import re
 import shutil
@@ -8,18 +8,20 @@ import warnings
 from typing import Dict, Tuple, List, Any
 from collections import namedtuple
 
+
+import jax.lax
+import math
 import jax
 import jax.numpy as jnp
+from jax import random
+from jax.scipy.ndimage import map_coordinates
 from jax import Array
 import optax
 import torchvision
 import treescope
 from flax import nnx
-from jax import random
 from jax.image import scale_and_translate
 
-# from scipy.ndimage import gaussian_filter  # Corrected import
-from jax.scipy.ndimage import map_coordinates
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import jax2onnx.plugins  # noqa: F401
@@ -89,41 +91,53 @@ def rotate_image(image: jnp.ndarray, angle: float) -> jnp.ndarray:
     return jnp.expand_dims(rotated_image, axis=-1)
 
 
-# import functools
+def jax_gaussian_filter(x: jnp.ndarray, sigma: float, radius: int) -> jnp.ndarray:
+    """Performs 2D Gaussian filtering on array x using separable convolutions."""
+    size = 2 * radius + 1
+    ax = jnp.arange(-radius, radius + 1, dtype=x.dtype)
+    kernel = jnp.exp(-0.5 * (ax / sigma) ** 2)
+    kernel = kernel / jnp.sum(kernel)
+    kernel_h = kernel.reshape((size, 1, 1, 1))
+    kernel_v = kernel.reshape((1, size, 1, 1))
+    x_exp = x[None, ..., None]
+    x_filtered = jax.lax.conv_general_dilated(
+        x_exp,
+        kernel_h,
+        window_strides=(1, 1),
+        padding="SAME",
+        dimension_numbers=("NHWC", "HWIO", "NHWC"),
+    )
+    x_filtered = jax.lax.conv_general_dilated(
+        x_filtered,
+        kernel_v,
+        window_strides=(1, 1),
+        padding="SAME",
+        dimension_numbers=("NHWC", "HWIO", "NHWC"),
+    )
+    return jnp.squeeze(x_filtered, axis=(0, 3))
 
 
-# @functools.partial(jax.jit, static_argnames=("alpha", "sigma", "x_grid", "y_grid"))
-# def elastic_deform(
-#         image: jnp.ndarray,
-#         alpha: float,
-#         sigma: float,
-#         rng_key: jnp.ndarray,
-#         x_grid: jnp.ndarray,
-#         y_grid: jnp.ndarray,
-# ) -> jnp.ndarray:
-#     """Applies elastic deformation to an image using a Gaussian filter.
-#
-#     Args:
-#         image: The input image (HWC).
-#         alpha: Scaling factor for the deformation.
-#         sigma: Standard deviation of the Gaussian filter.
-#         rng_key: JAX PRNG key for random number generation.
-#         x_grid: Precomputed x-coordinates meshgrid.
-#         y_grid: Precomputed y-coordinates meshgrid.
-#
-#     Returns:
-#         The deformed image.
-#     """
-#     shape = image.shape[:2]
-#     dx = random.normal(rng_key, shape) * alpha
-#     dy = random.normal(random.split(rng_key)[0], shape) * alpha
-#
-#     dx = gaussian_filter(np.asarray(dx), sigma)  # No mode or cval needed
-#     dy = gaussian_filter(np.asarray(dy), sigma)
-#
-#     indices = jnp.reshape(y_grid + dy, (-1, 1)), jnp.reshape(x_grid + dx, (-1, 1))
-#     deformed_image = map_coordinates(image[..., 0], indices, order=1, mode="reflect")
-#     return jnp.expand_dims(deformed_image.reshape(shape), axis=-1)
+@functools.partial(jax.jit, static_argnames=("radius",))
+def elastic_deform(
+    image: jnp.ndarray,
+    alpha: float,
+    sigma: float,
+    rng_key: jnp.ndarray,
+    x_grid: jnp.ndarray,
+    y_grid: jnp.ndarray,
+    radius: int,
+) -> jnp.ndarray:
+    shape = image.shape[:2]
+    key_dx, key_dy = random.split(rng_key, 2)
+    dx = random.normal(key_dx, shape) * alpha
+    dy = random.normal(key_dy, shape) * alpha
+
+    dx = jax_gaussian_filter(dx, sigma, radius)
+    dy = jax_gaussian_filter(dy, sigma, radius)
+
+    indices = (jnp.reshape(y_grid + dy, (-1, 1)), jnp.reshape(x_grid + dx, (-1, 1)))
+    deformed_image = map_coordinates(image[..., 0], indices, order=1, mode="reflect")
+    return jnp.expand_dims(deformed_image.reshape(shape), axis=-1)
 
 
 def visualize_augmented_images(
@@ -161,19 +175,22 @@ AugmentationParams = namedtuple(
 )
 
 
-@jax.jit
+@functools.partial(jax.jit, static_argnames=("augmentation_params",))
 def augment_data_batch(
     batch: Dict[str, jnp.ndarray],
     rng_key: jnp.ndarray,
     augmentation_params: AugmentationParams,
 ) -> Dict[str, jnp.ndarray]:
-    """Augments a batch of images."""
     images = batch["image"]
     batch_size, height, width, channels = images.shape
 
     x_grid, y_grid = np.meshgrid(np.arange(width), np.arange(height), indexing="xy")
     x_grid = jnp.array(x_grid)
     y_grid = jnp.array(y_grid)
+
+    alpha_val = augmentation_params.elastic_alpha
+    sigma_val = augmentation_params.elastic_sigma
+    radius_val = math.ceil(3.0 * sigma_val)
 
     def augment_single_image(image, key):
         key1, key2, key3, key4, key5, key6 = random.split(key, 6)
@@ -194,6 +211,12 @@ def augment_data_batch(
         scale = jnp.array([scale_factor_y, scale_factor_x])
         max_rotation = augmentation_params.max_rotation * (jnp.pi / 180.0)
         rotation_angle = random.uniform(key5, minval=-max_rotation, maxval=max_rotation)
+
+        # Pass radius_val into elastic_deform
+        image = elastic_deform(
+            image, alpha_val, sigma_val, key6, x_grid, y_grid, radius_val
+        )
+
         rotated_image = rotate_image(image, jnp.rad2deg(rotation_angle))
         augmented_image = scale_and_translate(
             image=rotated_image,
@@ -204,24 +227,11 @@ def augment_data_batch(
             method="linear",
             antialias=True,
         )
-        # augmented_image = elastic_deform(
-        #     augmented_image,
-        #     augmentation_params.elastic_alpha,
-        #     augmentation_params.elastic_sigma,
-        #     key6,
-        #     x_grid,
-        #     y_grid,
-        # )
         return augmented_image
 
     rng_keys = random.split(rng_key, num=batch_size)
     augmented_images = jax.vmap(augment_single_image)(images, rng_keys)
     return {"image": augmented_images, "label": batch["label"]}
-
-
-augment_data_batch = jax.jit(
-    augment_data_batch, static_argnames=["augmentation_params"]
-)
 
 
 def create_sinusoidal_embeddings(num_patches: int, num_hiddens: int) -> jnp.ndarray:
