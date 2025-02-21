@@ -724,11 +724,11 @@ def main() -> None:
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
             "augmentation": {
-                "max_translation": 2.0,
-                "scale_min_x": 0.7,
-                "scale_max_x": 1.1,
-                "scale_min_y": 0.8,
-                "scale_max_y": 1.1,
+                "max_translation": 3.0,
+                "scale_min_x": 0.85,
+                "scale_max_x": 1.15,
+                "scale_min_y": 0.85,
+                "scale_max_y": 1.15,
                 "max_rotation": 15.0,
                 "elastic_alpha": 10.0,  # distortion intensity
                 "elastic_sigma": 4.0,  # smoothing
@@ -801,6 +801,7 @@ def main() -> None:
         test_dataloader,
         start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
     )
+    config["onnx"]["component"] = model
     print("Exporting model to ONNX...")
     to_onnx(**config["onnx"])
 
