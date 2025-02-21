@@ -428,10 +428,11 @@ def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> N
     with open(csv_filepath, mode="r", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
-            epochs.append(int(row["epoch"]))
-            test_acc.append(float(row["test_accuracy"]))
-            mean_acc.append(float(row["mean_accuracy"]))
-            spread_acc.append(float(row["spread_accuracy"]))
+            if float(row["mean_accuracy"]) != 0.0:
+                epochs.append(int(row["epoch"]))
+                test_acc.append(float(row["test_accuracy"]))
+                mean_acc.append(float(row["mean_accuracy"]))
+                spread_acc.append(float(row["spread_accuracy"]))
     plt.style.use("ggplot")  # Changed to a valid Matplotlib style "ggplot"
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.plot(epochs, test_acc, label="Test Accuracy", marker="o", linestyle="-")
@@ -603,6 +604,9 @@ def train_model(
 
         visualize_incorrect_classifications(model, test_dataloader, epoch)
         save_model(model, config["training"]["checkpoint_dir"], epoch)
+        load_and_plot_test_accuracy_metrics(
+            "output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png"
+        )
     return metrics_history
 
 
@@ -797,10 +801,6 @@ def main() -> None:
         test_dataloader,
         start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
     )
-    load_and_plot_test_accuracy_metrics(
-        "output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png"
-    )
-    config["onnx"]["component"] = model
     print("Exporting model to ONNX...")
     to_onnx(**config["onnx"])
 
