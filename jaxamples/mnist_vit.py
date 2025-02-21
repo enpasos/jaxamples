@@ -715,7 +715,7 @@ def main() -> None:
         "training": {
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 20,
+            "num_epochs_to_train_now": 200,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
