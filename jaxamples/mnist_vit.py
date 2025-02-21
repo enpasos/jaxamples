@@ -33,6 +33,7 @@ import numpy as np
 
 matplotlib.use("Agg")  # Use a non-interactive backend to avoid Tkinter-related issues
 import matplotlib.pyplot as plt
+import csv
 
 warnings.filterwarnings(
     "ignore", message="Couldn't find sharding info under RestoreArgs.*"
@@ -387,6 +388,131 @@ def compute_mean_and_spread(values: List[float]) -> Tuple[float, float]:
     return mean, spread
 
 
+def save_test_accuracy_metrics(metrics_history: Dict[str, List[float]]) -> None:
+    """Saves test accuracy, mean, and spread metrics to a CSV file."""
+    output_csv = "output/test_accuracy_metrics.csv"
+    num_epochs = len(metrics_history["test_accuracy"])
+    with open(output_csv, mode="w", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["epoch", "test_accuracy", "mean_accuracy", "spread_accuracy"])
+        for i in range(num_epochs):
+            writer.writerow(
+                [
+                    i,
+                    metrics_history["test_accuracy"][i],
+                    metrics_history["test_accuracy_mean"][i],
+                    metrics_history["test_accuracy_spread"][i],
+                ]
+            )
+    print(f"Test accuracy metrics saved to {output_csv}")
+
+
+def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> None:
+    """Loads test accuracy metrics from a CSV file and generates a plot."""
+    epochs = []
+    test_acc = []
+    mean_acc = []
+    spread_acc = []
+    with open(csv_filepath, mode="r", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            epochs.append(int(row["epoch"]))
+            test_acc.append(float(row["test_accuracy"]))
+            mean_acc.append(float(row["mean_accuracy"]))
+            spread_acc.append(float(row["spread_accuracy"]))
+    plt.style.use("ggplot")  # Changed to a valid Matplotlib style "ggplot"
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.plot(epochs, test_acc, label="Test Accuracy", marker="o", linestyle="-")
+    ax.plot(
+        epochs,
+        mean_acc,
+        label="Moving Mean (last 10 epochs)",
+        marker="s",
+        linestyle="--",
+    )
+    mean_arr = np.array(mean_acc)
+    spread_arr = np.array(spread_acc)
+    ax.fill_between(
+        epochs,
+        mean_arr - spread_arr,
+        mean_arr + spread_arr,
+        color="gray",
+        alpha=0.3,
+        label="Spread (±1 std)",
+    )
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Test Accuracy Metrics Over Epochs")
+    ax.legend()
+    ax.grid(True)
+    fig.tight_layout()
+    plt.savefig(output_fig, dpi=300)
+    plt.close(fig)
+    print(f"Test accuracy graph saved to {output_fig}")
+
+
+def save_and_plot_test_accuracy_metrics(
+    metrics_history: Dict[str, List[float]]
+) -> None:
+    import csv
+
+    # Write CSV file
+    output_csv = "output/test_accuracy_metrics.csv"
+    num_epochs = len(metrics_history["test_accuracy"])
+    with open(output_csv, mode="w", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["epoch", "test_accuracy", "mean_accuracy", "spread_accuracy"])
+        for i in range(num_epochs):
+            writer.writerow(
+                [
+                    i,
+                    metrics_history["test_accuracy"][i],
+                    metrics_history["test_accuracy_mean"][i],
+                    metrics_history["test_accuracy_spread"][i],
+                ]
+            )
+    print(f"Test accuracy metrics saved to {output_csv}")
+
+    # Generate a professional-style plot.
+    plt.style.use("seaborn-paper")
+    epochs = list(range(num_epochs))
+    test_acc = metrics_history["test_accuracy"]
+    mean_acc = metrics_history["test_accuracy_mean"]
+    spread_acc = metrics_history["test_accuracy_spread"]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.plot(epochs, test_acc, label="Test Accuracy", marker="o", linestyle="-")
+    ax.plot(
+        epochs,
+        mean_acc,
+        label="Moving Mean (last 10 epochs)",
+        marker="s",
+        linestyle="--",
+    )
+    # Fill the area between (mean - spread) and (mean + spread)
+    mean_arr = np.array(mean_acc)
+    spread_arr = np.array(spread_acc)
+    ax.fill_between(
+        epochs,
+        mean_arr - spread_arr,
+        mean_arr + spread_arr,
+        color="gray",
+        alpha=0.3,
+        label="Spread (±1 std)",
+    )
+
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Test Accuracy Metrics Over Epochs")
+    ax.legend()
+    ax.grid(True)
+    fig.tight_layout()
+    output_fig = "output/test_accuracy_metrics.png"
+    plt.savefig(output_fig, dpi=300)
+    plt.close(fig)
+    print(f"Test accuracy graph saved to {output_fig}")
+
+
 def train_model(
     model: nnx.Module,
     start_epoch: int,
@@ -442,13 +568,26 @@ def train_model(
         )
 
         # Compute mean and spread of the accuracy over the last 10 epochs
-        if len(metrics_history["test_accuracy"]) >= 10:
-            recent_accuracies = metrics_history["test_accuracy"][-10:]
-            mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
-            print(
-                f"[test] last 10 epochs mean accuracy: {mean_accuracy:.4f}, "
-                f"spread: {spread_accuracy:.4f}"
-            )
+        # if len(metrics_history["test_accuracy"]) >= 10:
+        #     recent_accuracies = metrics_history["test_accuracy"][-10:]
+        #     mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
+        #     print(
+        #         f"[test] last 10 epochs mean accuracy: {mean_accuracy:.4f}, "
+        #         f"spread: {spread_accuracy:.4f}"
+        #     )
+
+        # After evaluating test metrics in each epoch:
+        n = len(metrics_history["test_accuracy"])
+        n_recent = min(n, 10)
+        recent_accuracies = metrics_history["test_accuracy"][-n_recent:]
+        mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
+        print(
+            f"[test] last {n_recent} epochs mean accuracy: {mean_accuracy:.4f}, "
+            f"spread: {spread_accuracy:.4f}"
+        )
+        # Store these values for later logging/plotting.
+        metrics_history.setdefault("test_accuracy_mean", []).append(mean_accuracy)
+        metrics_history.setdefault("test_accuracy_spread", []).append(spread_accuracy)
 
         visualize_incorrect_classifications(model, test_dataloader, epoch)
         save_model(model, config["training"]["checkpoint_dir"], epoch)
@@ -553,6 +692,8 @@ def main() -> None:
     os.makedirs("output", exist_ok=True)
     os.makedirs("docs", exist_ok=True)
 
+    # load_and_plot_test_accuracy_metrics("output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png")
+
     # jax.config.update("jax_log_compiles", True)  # Keep commented out unless debugging
 
     # Define all configuration parameters in a hierarchical dictionary.
@@ -562,7 +703,7 @@ def main() -> None:
         "training": {
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 200,
+            "num_epochs_to_train_now": 20,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
@@ -644,7 +785,10 @@ def main() -> None:
         test_dataloader,
         start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
     )
-
+    save_test_accuracy_metrics(metrics_history)
+    load_and_plot_test_accuracy_metrics(
+        "output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png"
+    )
     config["onnx"]["component"] = model
     print("Exporting model to ONNX...")
     to_onnx(**config["onnx"])
