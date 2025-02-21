@@ -388,23 +388,35 @@ def compute_mean_and_spread(values: List[float]) -> Tuple[float, float]:
     return mean, spread
 
 
-def save_test_accuracy_metrics(metrics_history: Dict[str, List[float]]) -> None:
+def save_test_accuracy_metrics(
+    metrics_history: Dict[str, List[float]], epoch: int
+) -> None:
     """Saves test accuracy, mean, and spread metrics to a CSV file."""
     output_csv = "output/test_accuracy_metrics.csv"
-    num_epochs = len(metrics_history["test_accuracy"])
-    with open(output_csv, mode="w", newline="") as csv_file:
+    file_exists = os.path.isfile(output_csv)
+    with open(output_csv, mode="a", newline="") as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow(["epoch", "test_accuracy", "mean_accuracy", "spread_accuracy"])
-        for i in range(num_epochs):
+        if not file_exists:
             writer.writerow(
-                [
-                    i,
-                    metrics_history["test_accuracy"][i],
-                    metrics_history["test_accuracy_mean"][i],
-                    metrics_history["test_accuracy_spread"][i],
-                ]
+                ["epoch", "test_accuracy", "mean_accuracy", "spread_accuracy"]
             )
-    print(f"Test accuracy metrics saved to {output_csv}")
+        writer.writerow(
+            [
+                epoch,
+                metrics_history["test_accuracy"][-1],
+                (
+                    metrics_history["test_accuracy_mean"][-1]
+                    if metrics_history["test_accuracy_mean"][-1] is not None
+                    else "N/A"
+                ),
+                (
+                    metrics_history["test_accuracy_spread"][-1]
+                    if metrics_history["test_accuracy_spread"][-1] is not None
+                    else "N/A"
+                ),
+            ]
+        )
+    print(f"Test accuracy metrics for epoch {epoch} saved to {output_csv}")
 
 
 def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> None:
@@ -527,6 +539,8 @@ def train_model(
         "train_accuracy": [],
         "test_loss": [],
         "test_accuracy": [],
+        "test_accuracy_mean": [],
+        "test_accuracy_spread": [],
     }
     optimizer = create_optimizer(model, config["training"]["base_learning_rate"], 1e-4)
     augmentation_params = AugmentationParams(**config["training"]["augmentation"])
@@ -568,26 +582,24 @@ def train_model(
         )
 
         # Compute mean and spread of the accuracy over the last 10 epochs
-        # if len(metrics_history["test_accuracy"]) >= 10:
-        #     recent_accuracies = metrics_history["test_accuracy"][-10:]
-        #     mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
-        #     print(
-        #         f"[test] last 10 epochs mean accuracy: {mean_accuracy:.4f}, "
-        #         f"spread: {spread_accuracy:.4f}"
-        #     )
+        if len(metrics_history["test_accuracy"]) >= 10:
+            n = len(metrics_history["test_accuracy"])
+            n_recent = min(n, 10)
+            recent_accuracies = metrics_history["test_accuracy"][-n_recent:]
+            mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
+            print(
+                f"[test] last {n_recent} epochs mean accuracy: {mean_accuracy:.4f}, "
+                f"spread: {spread_accuracy:.4f}"
+            )
+            # Store these values for later logging/plotting.
+            metrics_history["test_accuracy_mean"].append(mean_accuracy)
+            metrics_history["test_accuracy_spread"].append(spread_accuracy)
+        else:
+            metrics_history["test_accuracy_mean"].append(0.0)
+            metrics_history["test_accuracy_spread"].append(0.0)
 
-        # After evaluating test metrics in each epoch:
-        n = len(metrics_history["test_accuracy"])
-        n_recent = min(n, 10)
-        recent_accuracies = metrics_history["test_accuracy"][-n_recent:]
-        mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
-        print(
-            f"[test] last {n_recent} epochs mean accuracy: {mean_accuracy:.4f}, "
-            f"spread: {spread_accuracy:.4f}"
-        )
-        # Store these values for later logging/plotting.
-        metrics_history.setdefault("test_accuracy_mean", []).append(mean_accuracy)
-        metrics_history.setdefault("test_accuracy_spread", []).append(spread_accuracy)
+        # Save test accuracy metrics at the end of every epoch
+        save_test_accuracy_metrics(metrics_history, epoch)
 
         visualize_incorrect_classifications(model, test_dataloader, epoch)
         save_model(model, config["training"]["checkpoint_dir"], epoch)
@@ -785,7 +797,9 @@ def main() -> None:
         test_dataloader,
         start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
     )
-    save_test_accuracy_metrics(metrics_history)
+    save_test_accuracy_metrics(
+        metrics_history, start_epoch + config["training"]["num_epochs_to_train_now"] - 1
+    )
     load_and_plot_test_accuracy_metrics(
         "output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png"
     )
