@@ -797,9 +797,6 @@ def main() -> None:
         test_dataloader,
         start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
     )
-    save_test_accuracy_metrics(
-        metrics_history, start_epoch + config["training"]["num_epochs_to_train_now"] - 1
-    )
     load_and_plot_test_accuracy_metrics(
         "output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png"
     )
