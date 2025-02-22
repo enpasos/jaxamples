@@ -30,6 +30,7 @@ import orbax.checkpoint as orbax
 from jax2onnx.to_onnx import to_onnx
 import matplotlib
 import numpy as np
+import onnxruntime as ort
 
 matplotlib.use("Agg")  # Use a non-interactive backend to avoid Tkinter-related issues
 import matplotlib.pyplot as plt
@@ -172,6 +173,10 @@ AugmentationParams = namedtuple(
         "max_rotation",
         "elastic_alpha",
         "elastic_sigma",
+        "enable_elastic",
+        "enable_rotation",
+        "enable_scaling",
+        "enable_translation",
     ],
 )
 
@@ -213,22 +218,33 @@ def augment_data_batch(
         max_rotation = augmentation_params.max_rotation * (jnp.pi / 180.0)
         rotation_angle = random.uniform(key5, minval=-max_rotation, maxval=max_rotation)
 
-        # Pass radius_val into elastic_deform
-        image = elastic_deform(
-            image, alpha_val, sigma_val, key6, x_grid, y_grid, radius_val
-        )
+        if augmentation_params.enable_elastic:
+            image = elastic_deform(
+                image, alpha_val, sigma_val, key6, x_grid, y_grid, radius_val
+            )
 
-        rotated_image = rotate_image(image, jnp.rad2deg(rotation_angle))
-        augmented_image = scale_and_translate(
-            image=rotated_image,
-            shape=(height, width, channels),
-            spatial_dims=(0, 1),
-            scale=scale,
-            translation=translation,
-            method="linear",
-            antialias=True,
-        )
-        return augmented_image
+        if augmentation_params.enable_rotation:
+            image = rotate_image(image, jnp.rad2deg(rotation_angle))
+
+        if augmentation_params.enable_scaling or augmentation_params.enable_translation:
+            image = scale_and_translate(
+                image=image,
+                shape=(height, width, channels),
+                spatial_dims=(0, 1),
+                scale=(
+                    scale
+                    if augmentation_params.enable_scaling
+                    else jnp.array([1.0, 1.0])
+                ),
+                translation=(
+                    translation
+                    if augmentation_params.enable_translation
+                    else jnp.array([0.0, 0.0])
+                ),
+                method="linear",
+                antialias=True,
+            )
+        return image
 
     rng_keys = random.split(rng_key, num=batch_size)
     augmented_images = jax.vmap(augment_single_image)(images, rng_keys)
@@ -699,6 +715,31 @@ def get_latest_checkpoint_epoch(ckpt_dir: str) -> int:
     return max(epochs, default=0)
 
 
+def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
+    """Test the exported ONNX model with ONNX Runtime and the MNIST test set."""
+    session = ort.InferenceSession(onnx_model_path)
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
+
+    correct = 0
+    total = 0
+
+    for batch in test_dataloader:
+        images, labels = batch
+        images = images.numpy()
+        labels = labels.numpy()
+        images = images.transpose(0, 2, 3, 1)  # Convert to NHWC format
+
+        preds = session.run([output_name], {input_name: images})[0]
+        preds = np.argmax(preds, axis=1)
+
+        correct += (preds == labels).sum()
+        total += labels.shape[0]
+
+    accuracy = correct / total
+    print(f"ONNX model test accuracy: {accuracy:.4f}")
+
+
 # =============================================================================
 # Main function
 # =============================================================================
@@ -717,6 +758,7 @@ def main() -> None:
     config: Dict[str, Any] = {
         "seed": 5678,
         "training": {
+            "enable_training": False,  # New parameter to control training
             "batch_size": 64,
             "base_learning_rate": 0.0001,
             "num_epochs_to_train_now": 200,
@@ -724,12 +766,20 @@ def main() -> None:
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
             "augmentation": {
+                # translation in pixels
+                "enable_translation": True,
                 "max_translation": 3.0,
+                # scaling factors in x (horizontal) and y (vertical) directions
+                "enable_scaling": True,
                 "scale_min_x": 0.85,
                 "scale_max_x": 1.15,
                 "scale_min_y": 0.85,
                 "scale_max_y": 1.15,
+                # rotation in degrees
+                "enable_rotation": True,
                 "max_rotation": 15.0,
+                # elastic local deformations
+                "enable_elastic": False,
                 "elastic_alpha": 1.0,  # distortion intensity
                 "elastic_sigma": 1.0,  # smoothing
             },
@@ -738,7 +788,7 @@ def main() -> None:
             "height": 28,
             "width": 28,
             "num_hiddens": 256,
-            "num_layers": 8,
+            "num_layers": 4,
             "num_heads": 4,
             "mlp_dim": 256,
             "num_classes": 10,
@@ -750,7 +800,7 @@ def main() -> None:
         "onnx": {
             "model_file_name": "mnist_vit_model.onnx",
             "output_path": "docs/mnist_vit_model.onnx",
-            "input_shapes": [(1, 28, 28, 1)],
+            "input_shapes": [(1000, 28, 28, 1)],
             "params": {
                 "pre_transpose": [(0, 3, 1, 2)],  # Convert JAX → ONNX
             },
@@ -792,18 +842,30 @@ def main() -> None:
         loss=nnx.metrics.Average("loss"),
     )
 
-    metrics_history = train_model(
-        model, start_epoch, metrics, config, train_dataloader, test_dataloader, rng_key
-    )
-    visualize_results(
-        metrics_history,
-        model,
-        test_dataloader,
-        start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
-    )
+    if config["training"]["enable_training"]:
+        metrics_history = train_model(
+            model,
+            start_epoch,
+            metrics,
+            config,
+            train_dataloader,
+            test_dataloader,
+            rng_key,
+        )
+        visualize_results(
+            metrics_history,
+            model,
+            test_dataloader,
+            start_epoch + config["training"]["num_epochs_to_train_now"] - 1,
+        )
+
+    # onnx export
     config["onnx"]["component"] = model
     print("Exporting model to ONNX...")
     to_onnx(**config["onnx"])
+
+    # Test the exported ONNX model
+    test_onnx_model(config["onnx"]["output_path"], test_dataloader)
 
 
 if __name__ == "__main__":
