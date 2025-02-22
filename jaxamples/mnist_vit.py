@@ -730,8 +730,8 @@ def main() -> None:
                 "scale_min_y": 0.85,
                 "scale_max_y": 1.15,
                 "max_rotation": 15.0,
-                "elastic_alpha": 10.0,  # distortion intensity
-                "elastic_sigma": 4.0,  # smoothing
+                "elastic_alpha": 1.0,  # distortion intensity
+                "elastic_sigma": 1.0,  # smoothing
             },
         },
         "model": {
