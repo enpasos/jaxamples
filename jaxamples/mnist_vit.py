@@ -758,7 +758,7 @@ def main() -> None:
     config: Dict[str, Any] = {
         "seed": 5678,
         "training": {
-            "enable_training": False,  # New parameter to control training
+            "enable_training": True,  # New parameter to control training
             "batch_size": 64,
             "base_learning_rate": 0.0001,
             "num_epochs_to_train_now": 200,
