@@ -777,11 +777,11 @@ def main() -> None:
                 "scale_max_y": 1.15,
                 # rotation in degrees
                 "enable_rotation": True,
-                "max_rotation": 15.0,
+                "max_rotation": 10.0,
                 # elastic local deformations
                 "enable_elastic": True,
-                "elastic_alpha": 1.0,  # distortion intensity
-                "elastic_sigma": 0.5,  # smoothing
+                "elastic_alpha": 0.5,  # distortion intensity
+                "elastic_sigma": 1.0,  # smoothing
             },
         },
         "model": {
