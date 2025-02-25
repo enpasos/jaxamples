@@ -779,9 +779,9 @@ def main() -> None:
                 "enable_rotation": True,
                 "max_rotation": 15.0,
                 # elastic local deformations
-                "enable_elastic": False,
+                "enable_elastic": True,
                 "elastic_alpha": 1.0,  # distortion intensity
-                "elastic_sigma": 1.0,  # smoothing
+                "elastic_sigma": 0.5,  # smoothing
             },
         },
         "model": {
