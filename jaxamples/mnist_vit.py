@@ -780,8 +780,8 @@ def main() -> None:
                 "max_rotation": 10.0,
                 # elastic local deformations
                 "enable_elastic": True,
-                "elastic_alpha": 0.5,  # distortion intensity
-                "elastic_sigma": 1.0,  # smoothing
+                "elastic_alpha": 0.3,  # distortion intensity
+                "elastic_sigma": 0.8,  # smoothing
             },
         },
         "model": {
