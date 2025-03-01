@@ -27,7 +27,7 @@ from torchvision import transforms
 import jax2onnx.plugins  # noqa: F401
 from jax2onnx.examples.mnist_vit import VisionTransformer
 import orbax.checkpoint as orbax
-from jax2onnx.to_onnx import to_onnx
+from jax2onnx import to_onnx
 import matplotlib
 import numpy as np
 import onnxruntime as ort
@@ -781,7 +781,7 @@ def main() -> None:
                 # elastic local deformations
                 "enable_elastic": True,
                 "elastic_alpha": 0.3,  # distortion intensity
-                "elastic_sigma": 0.8,  # smoothing
+                "elastic_sigma": 0.6,  # smoothing
             },
         },
         "model": {
