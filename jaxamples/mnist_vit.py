@@ -800,7 +800,7 @@ def main() -> None:
         "onnx": {
             "model_file_name": "mnist_vit_model.onnx",
             "output_path": "docs/mnist_vit_model.onnx",
-            "input_shapes": [(1000, 28, 28, 1)],
+            "input_shapes": [("B", 28, 28, 1)],
             "params": {
                 "pre_transpose": [(0, 3, 1, 2)],  # Convert JAX → ONNX
             },
