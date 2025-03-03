@@ -777,7 +777,7 @@ def main() -> None:
                 "scale_max_y": 1.15,
                 # rotation in degrees
                 "enable_rotation": True,
-                "max_rotation": 10.0,
+                "max_rotation": 15.0,
                 # elastic local deformations
                 "enable_elastic": True,
                 "elastic_alpha": 0.3,  # distortion intensity
@@ -792,10 +792,13 @@ def main() -> None:
             "num_heads": 4,
             "mlp_dim": 256,
             "num_classes": 10,
-            "dropout_rate": 0.5,
             "embed_dims": [32, 128, 256],
             "kernel_size": 3,
             "strides": [1, 2, 2],
+            "embedding_type": "conv",  # "patch" or "conv"
+            "embedding_dropout_rate": 0.1,
+            "attention_dropout_rate": 0.3,
+            "mlp_dropout_rate": 0.5,
         },
         "onnx": {
             "model_file_name": "mnist_vit_model.onnx",
