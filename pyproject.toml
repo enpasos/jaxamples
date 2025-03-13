@@ -1,7 +1,7 @@
 # file: pyproject.toml
 [project]
 name = "jaxamples"
-version = "0.1.0"
+version = "0.2.0"
 description = "Examples build on JAX, Flax, nnx, onnx, jax2onnx"
 authors = [{ name = "enpasos", email = "matthias.unverzagt@enpasos.ai" }]
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
     "onnxruntime>=1.20.1",
     "torchvision==0.20.1",
     "matplotlib>=3.10.0",
-    "jax2onnx (>=0.1.0.dev20250302,<0.2.0)",
+    "jax2onnx (>=0.2.0.dev20250313,<0.3.0)",
 
 ]
 

@@ -24,10 +24,10 @@ from jax.image import scale_and_translate
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
-import jax2onnx.plugins  # noqa: F401
-from jax2onnx.examples.mnist_vit import VisionTransformer
+from jax2onnx import save_onnx, allclose
+from jax2onnx.examples.vit import VisionTransformer
 import orbax.checkpoint as orbax
-from jax2onnx import to_onnx
+
 import matplotlib
 import numpy as np
 import onnxruntime as ort
@@ -801,12 +801,9 @@ def main() -> None:
             "mlp_dropout_rate": 0.5,
         },
         "onnx": {
-            "model_file_name": "mnist_vit_model.onnx",
+            "model_name": "mnist_vit_model",
             "output_path": "docs/mnist_vit_model.onnx",
-            "input_shapes": [("B", 28, 28, 1)],
-            "params": {
-                "pre_transpose": [(0, 3, 1, 2)],  # Convert JAX → ONNX
-            },
+            "input_shapes": [(3, 28, 28, 1)],
         },
     }
 
@@ -863,12 +860,16 @@ def main() -> None:
         )
 
     # onnx export
-    config["onnx"]["component"] = model
+    config["onnx"]["fn"] = model
     print("Exporting model to ONNX...")
-    to_onnx(**config["onnx"])
+    save_onnx(**config["onnx"])
 
     # Test the exported ONNX model
-    test_onnx_model(config["onnx"]["output_path"], test_dataloader)
+    xs = [
+        jax.random.normal(rngs, tuple(shape))
+        for shape in config["onnx"]["input_shapes"]
+    ]
+    allclose(model, config["onnx"]["onnx_model_path"], *xs)
 
 
 if __name__ == "__main__":
