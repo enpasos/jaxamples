@@ -869,7 +869,7 @@ def main() -> None:
         jax.random.normal(rngs, tuple(shape))
         for shape in config["onnx"]["input_shapes"]
     ]
-    allclose(model, config["onnx"]["onnx_model_path"], *xs)
+    print(allclose(model, config["onnx"]["onnx_model_path"], *xs))
 
 
 if __name__ == "__main__":
