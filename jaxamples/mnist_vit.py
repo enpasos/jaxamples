@@ -761,7 +761,7 @@ def main() -> None:
             "enable_training": True,  # New parameter to control training
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 1000,
+            "num_epochs_to_train_now": 500,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
@@ -866,10 +866,10 @@ def main() -> None:
 
     # Test the exported ONNX model
     xs = [
-        jax.random.normal(rngs, tuple(shape))
+        jax.random.normal(rng_key, tuple(shape))
         for shape in config["onnx"]["input_shapes"]
     ]
-    print(allclose(model, config["onnx"]["onnx_model_path"], *xs))
+    print(allclose(model, config["onnx"]["output_path"], *xs))
 
 
 if __name__ == "__main__":
