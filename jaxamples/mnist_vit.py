@@ -25,7 +25,7 @@ from jax.image import scale_and_translate
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from jax2onnx import save_onnx, allclose
-from jax2onnx.plugins.examples.vit import VisionTransformer
+from jax2onnx.plugins.examples.nnx.vit import VisionTransformer
 import orbax.checkpoint as orbax
 
 import matplotlib
