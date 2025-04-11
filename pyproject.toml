@@ -18,11 +18,12 @@ dependencies = [
     "onnxruntime>=1.20.1",
     "torchvision==0.20.1",
     "matplotlib>=3.10.0",
-    "jax2onnx (>=0.4.1)"
+    "jax2onnx (>=0.4.2)"
 
 ]
 
-# [tool.poetry.dependencies]
+[tool.poetry.dependencies]
+jax2onnx = {source = "testpypi"}
 # jax2onnx = { path = "../jax2onnx", develop = true }
 
 [tool.poetry.group.test]
