@@ -5,7 +5,7 @@ version = "0.3.0"
 description = "Examples build on JAX, Flax, nnx, onnx, jax2onnx"
 authors = [{ name = "enpasos", email = "matthias.unverzagt@enpasos.ai" }]
 readme = "README.md"
-requires-python = ">=3.12,<4"
+requires-python = ">=3.10"
 dependencies = [
     "jax[cuda12] (>=0.5.3,<0.6.0)",
     "flax>=0.10.4",
@@ -18,9 +18,12 @@ dependencies = [
     "onnxruntime>=1.20.1",
     "torchvision==0.20.1",
     "matplotlib>=3.10.0",
-    "jax2onnx (>=0.4.0.dev20250329)"
+    "jax2onnx (>=0.4.1)"
 
 ]
+
+# [tool.poetry.dependencies]
+# jax2onnx = { path = "../jax2onnx", develop = true }
 
 [tool.poetry.group.test]
 optional = true
@@ -32,12 +35,12 @@ matplotlib = "==3.10.0"
 
 
 
-[tool.poetry.dependencies]
-jax2onnx = {source = "testpypi"}
+
 
 [tool.poetry]
 packages = [
-    { include = "jaxamples" }
+    { include = "jaxamples" },
+#    { include = "jax2onnx", from = "../jax2onnx" }
 ]
 
 [[tool.poetry.source]]

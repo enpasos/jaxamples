@@ -761,7 +761,7 @@ def main() -> None:
             "enable_training": True,  # New parameter to control training
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 500,
+            "num_epochs_to_train_now": 1000,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
@@ -771,7 +771,7 @@ def main() -> None:
                 "max_translation": 3.0,
                 # scaling factors in x (horizontal) and y (vertical) directions
                 "enable_scaling": True,
-                "scale_min_x": 0.85,
+                "scale_min_x": 0.5,
                 "scale_max_x": 1.15,
                 "scale_min_y": 0.85,
                 "scale_max_y": 1.15,
@@ -780,7 +780,7 @@ def main() -> None:
                 "max_rotation": 15.0,
                 # elastic local deformations
                 "enable_elastic": True,
-                "elastic_alpha": 0.3,  # distortion intensity
+                "elastic_alpha": 0.5,  # distortion intensity
                 "elastic_sigma": 0.6,  # smoothing
             },
         },
