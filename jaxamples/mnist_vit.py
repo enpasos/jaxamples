@@ -761,7 +761,7 @@ def main() -> None:
             "enable_training": True,  # New parameter to control training
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 1000,
+            "num_epochs_to_train_now": 1,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
@@ -780,7 +780,7 @@ def main() -> None:
                 "max_rotation": 15.0,
                 # elastic local deformations
                 "enable_elastic": True,
-                "elastic_alpha": 0.5,  # distortion intensity
+                "elastic_alpha": 1.0,  # distortion intensity
                 "elastic_sigma": 0.6,  # smoothing
             },
         },
@@ -796,14 +796,17 @@ def main() -> None:
             "kernel_size": 3,
             "strides": [1, 2, 2],
             "embedding_type": "conv",  # "patch" or "conv"
-            "embedding_dropout_rate": 0.1,
-            "attention_dropout_rate": 0.3,
+            "embedding_dropout_rate": 0.5,
+            "attention_dropout_rate": 0.5,
             "mlp_dropout_rate": 0.5,
         },
         "onnx": {
             "model_name": "mnist_vit_model",
             "output_path": "docs/mnist_vit_model.onnx",
             "input_shapes": [(3, 28, 28, 1)],
+            "input_params": {
+                "deterministic": True,
+            },
         },
     }
 
