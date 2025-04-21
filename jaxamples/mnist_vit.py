@@ -16,6 +16,7 @@ import jax.numpy as jnp
 from jax import random
 from jax.scipy.ndimage import map_coordinates
 from jax import Array
+import onnx
 import optax
 import torchvision
 import treescope
@@ -24,8 +25,10 @@ from jax.image import scale_and_translate
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from jax2onnx import save_onnx, allclose
+from jax2onnx import to_onnx, allclose
 from jax2onnx.plugins.examples.nnx.vit import VisionTransformer
+
+# from jaxamples.vit import VisionTransformer
 import orbax.checkpoint as orbax
 
 import matplotlib
@@ -353,11 +356,7 @@ def visualize_incorrect_classifications(
         return
 
     # If 50 or fewer, display all
-    fig, axes = (
-        plt.subplots(1, num_images, figsize=(15, 5))
-        if num_images > 1
-        else (plt.subplots(1, num_images, figsize=figsize)[1],)
-    )
+    fig, axes = plt.subplots(1, num_images, figsize=figsize)
     if num_images == 1:
         axes = [axes]  # Ensure axes is iterable for a single subplot
     for i, ax in enumerate(axes):
@@ -481,7 +480,7 @@ def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> N
 
 
 def save_and_plot_test_accuracy_metrics(
-    metrics_history: Dict[str, List[float]]
+    metrics_history: Dict[str, List[float]],
 ) -> None:
     import csv
 
@@ -730,7 +729,8 @@ def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
         labels = labels.numpy()
         images = images.transpose(0, 2, 3, 1)  # Convert to NHWC format
 
-        preds = session.run([output_name], {input_name: images})[0]
+        inputs = {input_name: images, "deterministic": np.array(True)}
+        preds = session.run([output_name], inputs)[0]
         preds = np.argmax(preds, axis=1)
 
         correct += (preds == labels).sum()
@@ -758,10 +758,10 @@ def main() -> None:
     config: Dict[str, Any] = {
         "seed": 5678,
         "training": {
-            "enable_training": True,  # New parameter to control training
+            "enable_training": True,
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 1,
+            "num_epochs_to_train_now": 100,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
@@ -780,7 +780,7 @@ def main() -> None:
                 "max_rotation": 15.0,
                 # elastic local deformations
                 "enable_elastic": True,
-                "elastic_alpha": 1.0,  # distortion intensity
+                "elastic_alpha": 0.5,  # distortion intensity
                 "elastic_sigma": 0.6,  # smoothing
             },
         },
@@ -796,14 +796,14 @@ def main() -> None:
             "kernel_size": 3,
             "strides": [1, 2, 2],
             "embedding_type": "conv",  # "patch" or "conv"
-            "embedding_dropout_rate": 0.5,
-            "attention_dropout_rate": 0.5,
+            "embedding_dropout_rate": 0.1,
+            "attention_dropout_rate": 0.3,
             "mlp_dropout_rate": 0.5,
         },
         "onnx": {
             "model_name": "mnist_vit_model",
             "output_path": "docs/mnist_vit_model.onnx",
-            "input_shapes": [(3, 28, 28, 1)],
+            "input_shapes": [(1000, 28, 28, 1)],
             "input_params": {
                 "deterministic": True,
             },
@@ -863,16 +863,21 @@ def main() -> None:
         )
 
     # onnx export
-    config["onnx"]["fn"] = model
+    inputs = config["onnx"]["input_shapes"]
+    input_params = {"deterministic": True}
+    output_path = config["onnx"]["output_path"]
     print("Exporting model to ONNX...")
-    save_onnx(**config["onnx"])
+    onnx_model = to_onnx(model, inputs, input_params)
+    onnx.save_model(onnx_model, output_path)
+    print(f"Model exported to {output_path }")
 
     # Test the exported ONNX model
-    xs = [
-        jax.random.normal(rng_key, tuple(shape))
-        for shape in config["onnx"]["input_shapes"]
-    ]
-    print(allclose(model, config["onnx"]["output_path"], *xs))
+    xs = [jax.random.normal(rng_key, tuple(shape)) for shape in inputs]
+
+    # Correct allclose usage: pass model kwargs directly, not as jax_kwargs
+    model.eval()
+    result = allclose(model, output_path, xs, input_params)
+    print(f"ONNX allclose result: {result}")
 
 
 if __name__ == "__main__":
