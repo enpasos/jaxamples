@@ -1,6 +1,6 @@
 [project]
 name = "jaxamples"
-version = "0.3.0"
+version = "0.1.0"
 description = "Examples built on JAX, Flax, nnx, onnx, jax2onnx"
 authors = [{ name = "enpasos", email = "matthias.unverzagt@enpasos.ai" }]
 readme = "README.md"

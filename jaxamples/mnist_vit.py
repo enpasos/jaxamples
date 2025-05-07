@@ -761,7 +761,7 @@ def main() -> None:
             "enable_training": True,
             "batch_size": 64,
             "base_learning_rate": 0.0001,
-            "num_epochs_to_train_now": 100,
+            "num_epochs_to_train_now": 500,
             "warmup_epochs": 5,
             "checkpoint_dir": os.path.abspath("./data/checkpoints/"),
             "data_dir": "./data",
@@ -803,7 +803,7 @@ def main() -> None:
         "onnx": {
             "model_name": "mnist_vit_model",
             "output_path": "docs/mnist_vit_model.onnx",
-            "input_shapes": [(1000, 28, 28, 1)],
+            "input_shapes": [("B", 28, 28, 1)],
             "input_params": {
                 "deterministic": True,
             },
@@ -869,15 +869,25 @@ def main() -> None:
     print("Exporting model to ONNX...")
     onnx_model = to_onnx(model, inputs, input_params)
     onnx.save_model(onnx_model, output_path)
-    print(f"Model exported to {output_path }")
+    print(f"Model exported to {output_path}")
 
-    # Test the exported ONNX model
-    xs = [jax.random.normal(rng_key, tuple(shape)) for shape in inputs]
+    # Test the exported ONNX model with a concrete batch size
+    # Replace symbolic 'B' with a concrete batch size (e.g., 4)
+    concrete_shapes = []
+    for shape in inputs:
+        # Convert placeholder 'B' to an actual integer batch size
+        concrete_shape = tuple(4 if dim == "B" else dim for dim in shape)
+        concrete_shapes.append(concrete_shape)
+
+    xs = [jax.random.normal(rng_key, shape) for shape in concrete_shapes]
 
     # Correct allclose usage: pass model kwargs directly, not as jax_kwargs
     model.eval()
     result = allclose(model, output_path, xs, input_params)
     print(f"ONNX allclose result: {result}")
+
+    # Also test with actual test data from the dataloader
+    test_onnx_model(output_path, test_dataloader)
 
 
 if __name__ == "__main__":
