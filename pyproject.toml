@@ -1,42 +1,37 @@
-# file: pyproject.toml
 [project]
 name = "jaxamples"
-version = "0.1.0"
-description = "Examples build on JAX, Flax, nnx, onnx, jax2onnx"
+version = "0.3.0"
+description = "Examples built on JAX, Flax, nnx, onnx, jax2onnx"
 authors = [{ name = "enpasos", email = "matthias.unverzagt@enpasos.ai" }]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "jax[cuda12] (>=0.5.3,<0.6.0)",
-    "flax>=0.10.4",
-    "ml_dtypes>=0.5.1",
-    "optax>=0.2.4",
-    "orbax-checkpoint>=0.11.6",
-    "orbax-export>=0.0.6",
-    "netron>=8.1.9",
-    "onnx>=1.17.0",
-    "onnxruntime>=1.20.1",
-    "torchvision==0.20.1",
-    "matplotlib>=3.10.0",
-    "jax2onnx>=0.4.3"
 
-]
-
-[tool.poetry.dependencies] 
+[tool.poetry.dependencies]
+python = ">=3.10"
+jax = { version = ">=0.6.0", extras = ["cuda12"] }
+flax = ">=0.10.6"
+ml_dtypes = ">=0.5.1"
+optax = ">=0.2.4"
+orbax-checkpoint = ">=0.11.6"
+orbax-export = ">=0.0.6"
+netron = ">=8.1.9"
+onnx = ">=1.17.0"
+onnxruntime = ">=1.20.1"
+matplotlib = ">=3.10.0"
+jax2onnx = ">=0.5.0"
+torch = { version = "2.5.1", source = "pytorch", markers = "python_version == '3.10'" }
+torchvision = { version = "0.20.1", source = "pytorch", markers = "python_version == '3.10'" }
 
 [tool.poetry.group.test]
 optional = true
 
 [tool.poetry.group.test.dependencies]
 treescope = ">=0.1.8"
-torchvision = "==0.20.1"
 matplotlib = "==3.10.0"
-
-
 
 [tool.poetry]
 packages = [
-    { include = "jaxamples" }, 
+    { include = "jaxamples" },
 ]
 
 [[tool.poetry.source]]
@@ -44,21 +39,21 @@ name = "jax-releases"
 url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
 priority = "supplemental"
 
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "supplemental"
 
 [[tool.poetry.source]]
 name = "testpypi"
 url = "https://test.pypi.org/simple/"
 priority = "explicit"
 
-
-
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
 pytest-json-report = "^1.5.0"
 pre-commit = "^4.1.0"
 ruff = "^0.9.5"
-
-
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
