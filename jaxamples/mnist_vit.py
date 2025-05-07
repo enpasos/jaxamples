@@ -180,6 +180,9 @@ AugmentationParams = namedtuple(
         "enable_rotation",
         "enable_scaling",
         "enable_translation",
+        "enable_rect_erasing",
+        "rect_erase_height",
+        "rect_erase_width",
     ],
 )
 
@@ -202,7 +205,7 @@ def augment_data_batch(
     radius_val = math.ceil(3.0 * sigma_val)
 
     def augment_single_image(image, key):
-        key1, key2, key3, key4, key5, key6 = random.split(key, 6)
+        key1, key2, key3, key4, key5, key6, key7, key8 = random.split(key, 8)
         max_translation = augmentation_params.max_translation
         tx = random.uniform(key1, minval=-max_translation, maxval=max_translation)
         ty = random.uniform(key2, minval=-max_translation, maxval=max_translation)
@@ -247,6 +250,26 @@ def augment_data_batch(
                 method="linear",
                 antialias=True,
             )
+
+        # Rectangle erasing augmentation
+        if getattr(augmentation_params, "enable_rect_erasing", False):
+            erase_h = getattr(augmentation_params, "rect_erase_height", 6)
+            erase_w = getattr(augmentation_params, "rect_erase_width", 6)
+            # Random top-left corner
+            max_y = height - erase_h
+            max_x = width - erase_w
+            y0 = jax.lax.floor(
+                random.uniform(key7, (), minval=0, maxval=max_y + 1)
+            ).astype(jnp.int32)
+            x0 = jax.lax.floor(
+                random.uniform(key8, (), minval=0, maxval=max_x + 1)
+            ).astype(jnp.int32)
+            # Erase (set to 0) using dynamic_update_slice
+            mask = jnp.ones_like(image)
+            erase_shape = (erase_h, erase_w, channels)
+            zero_patch = jnp.zeros(erase_shape, dtype=image.dtype)
+            mask = jax.lax.dynamic_update_slice(mask, zero_patch, (y0, x0, 0))
+            image = image * mask
         return image
 
     rng_keys = random.split(rng_key, num=batch_size)
@@ -820,6 +843,10 @@ def main() -> None:
                 "enable_elastic": False,
                 "elastic_alpha": 1.0,  # distortion intensity
                 "elastic_sigma": 0.6,  # smoothing
+                # rectangle erasing
+                "enable_rect_erasing": True,
+                "rect_erase_height": 6,
+                "rect_erase_width": 6,
             },
         },
         "model": {
