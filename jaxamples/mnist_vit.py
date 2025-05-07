@@ -809,16 +809,16 @@ def main() -> None:
                 "max_translation": 3.0,
                 # scaling factors in x (horizontal) and y (vertical) directions
                 "enable_scaling": True,
-                "scale_min_x": 0.5,
+                "scale_min_x": 0.7,
                 "scale_max_x": 1.15,
                 "scale_min_y": 0.85,
                 "scale_max_y": 1.15,
                 # rotation in degrees
                 "enable_rotation": True,
-                "max_rotation": 15.0,
+                "max_rotation": 17.0,
                 # elastic local deformations
-                "enable_elastic": True,
-                "elastic_alpha": 0.5,  # distortion intensity
+                "enable_elastic": False,
+                "elastic_alpha": 1.0,  # distortion intensity
                 "elastic_sigma": 0.6,  # smoothing
             },
         },
