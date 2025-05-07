@@ -413,11 +413,30 @@ def save_test_accuracy_metrics(
         writer = csv.writer(csv_file)
         if not file_exists:
             writer.writerow(
-                ["epoch", "test_accuracy", "mean_accuracy", "spread_accuracy"]
+                [
+                    "epoch",
+                    "train_accuracy",
+                    "train_mean_accuracy",
+                    "train_spread_accuracy",
+                    "test_accuracy",
+                    "test_mean_accuracy",
+                    "test_spread_accuracy",
+                ]
             )
         writer.writerow(
             [
                 epoch,
+                metrics_history["train_accuracy"][-1],
+                (
+                    metrics_history["train_accuracy_mean"][-1]
+                    if metrics_history["train_accuracy_mean"][-1] is not None
+                    else "N/A"
+                ),
+                (
+                    metrics_history["train_accuracy_spread"][-1]
+                    if metrics_history["train_accuracy_spread"][-1] is not None
+                    else "N/A"
+                ),
                 metrics_history["test_accuracy"][-1],
                 (
                     metrics_history["test_accuracy_mean"][-1]
@@ -431,52 +450,64 @@ def save_test_accuracy_metrics(
                 ),
             ]
         )
-    print(f"Test accuracy metrics for epoch {epoch} saved to {output_csv}")
+    print(f"Test and train accuracy metrics for epoch {epoch} saved to {output_csv}")
 
 
 def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> None:
     """Loads test accuracy metrics from a CSV file and generates a plot."""
     epochs = []
+    train_acc = []
+    train_mean = []
+    train_spread = []
     test_acc = []
-    mean_acc = []
-    spread_acc = []
+    test_mean = []
+    test_spread = []
     with open(csv_filepath, mode="r", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
-            if float(row["mean_accuracy"]) != 0.0:
+            # Only plot if both means are not zero (skip warmup rows)
+            if (
+                float(row["test_mean_accuracy"]) != 0.0
+                and float(row["train_mean_accuracy"]) != 0.0
+            ):
                 epochs.append(int(row["epoch"]))
+                train_acc.append(float(row["train_accuracy"]))
+                train_mean.append(float(row["train_mean_accuracy"]))
+                train_spread.append(float(row["train_spread_accuracy"]))
                 test_acc.append(float(row["test_accuracy"]))
-                mean_acc.append(float(row["mean_accuracy"]))
-                spread_acc.append(float(row["spread_accuracy"]))
-    plt.style.use("ggplot")  # Changed to a valid Matplotlib style "ggplot"
+                test_mean.append(float(row["test_mean_accuracy"]))
+                test_spread.append(float(row["test_spread_accuracy"]))
+    plt.style.use("ggplot")
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.plot(epochs, test_acc, label="Test Accuracy", marker="o", linestyle="-")
-    ax.plot(
-        epochs,
-        mean_acc,
-        label="Moving Mean (last 10 epochs)",
-        marker="s",
-        linestyle="--",
-    )
-    mean_arr = np.array(mean_acc)
-    spread_arr = np.array(spread_acc)
+    ax.plot(epochs, test_mean, label="Test Mean (last 10)", marker="s", linestyle="--")
     ax.fill_between(
         epochs,
-        mean_arr - spread_arr,
-        mean_arr + spread_arr,
+        np.array(test_mean) - np.array(test_spread),
+        np.array(test_mean) + np.array(test_spread),
         color="gray",
-        alpha=0.3,
-        label="Spread (±1 std)",
+        alpha=0.2,
+        label="Test Spread (±1 std)",
+    )
+    ax.plot(epochs, train_acc, label="Train Accuracy", marker="^", linestyle="-")
+    ax.plot(epochs, train_mean, label="Train Mean (last 10)", marker="x", linestyle=":")
+    ax.fill_between(
+        epochs,
+        np.array(train_mean) - np.array(train_spread),
+        np.array(train_mean) + np.array(train_spread),
+        color="blue",
+        alpha=0.1,
+        label="Train Spread (±1 std)",
     )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Accuracy")
-    ax.set_title("Test Accuracy Metrics Over Epochs")
+    ax.set_title("Train & Test Accuracy Metrics Over Epochs")
     ax.legend()
     ax.grid(True)
     fig.tight_layout()
     plt.savefig(output_fig, dpi=300)
     plt.close(fig)
-    print(f"Test accuracy graph saved to {output_fig}")
+    print(f"Test and train accuracy graph saved to {output_fig}")
 
 
 def save_and_plot_test_accuracy_metrics(
@@ -553,6 +584,8 @@ def train_model(
     metrics_history: Dict[str, List[float]] = {
         "train_loss": [],
         "train_accuracy": [],
+        "train_accuracy_mean": [],
+        "train_accuracy_spread": [],
         "test_loss": [],
         "test_accuracy": [],
         "test_accuracy_mean": [],
@@ -597,22 +630,27 @@ def train_model(
             f"accuracy: {metrics_history['test_accuracy'][-1]:.4f}"
         )
 
-        # Compute mean and spread of the accuracy over the last 10 epochs
-        if len(metrics_history["test_accuracy"]) >= 10:
-            n = len(metrics_history["test_accuracy"])
-            n_recent = min(n, 10)
-            recent_accuracies = metrics_history["test_accuracy"][-n_recent:]
-            mean_accuracy, spread_accuracy = compute_mean_and_spread(recent_accuracies)
-            print(
-                f"[test] last {n_recent} epochs mean accuracy: {mean_accuracy:.4f}, "
-                f"spread: {spread_accuracy:.4f}"
-            )
-            # Store these values for later logging/plotting.
-            metrics_history["test_accuracy_mean"].append(mean_accuracy)
-            metrics_history["test_accuracy_spread"].append(spread_accuracy)
-        else:
-            metrics_history["test_accuracy_mean"].append(0.0)
-            metrics_history["test_accuracy_spread"].append(0.0)
+        # Compute mean and spread of the accuracy over the last 10 epochs for both train and test
+        for split in ["train", "test"]:
+            acc_key = f"{split}_accuracy"
+            mean_key = f"{split}_accuracy_mean"
+            spread_key = f"{split}_accuracy_spread"
+            if len(metrics_history[acc_key]) >= 10:
+                n = len(metrics_history[acc_key])
+                n_recent = min(n, 10)
+                recent_accuracies = metrics_history[acc_key][-n_recent:]
+                mean_accuracy, spread_accuracy = compute_mean_and_spread(
+                    recent_accuracies
+                )
+                print(
+                    f"[{split}] last {n_recent} epochs mean accuracy: {mean_accuracy:.4f}, "
+                    f"spread: {spread_accuracy:.4f}"
+                )
+                metrics_history[mean_key].append(mean_accuracy)
+                metrics_history[spread_key].append(spread_accuracy)
+            else:
+                metrics_history[mean_key].append(0.0)
+                metrics_history[spread_key].append(0.0)
 
         # Save test accuracy metrics at the end of every epoch
         save_test_accuracy_metrics(metrics_history, epoch)
