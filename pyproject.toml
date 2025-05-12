@@ -42,7 +42,7 @@ priority = "supplemental"
 [[tool.poetry.source]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cpu"
-priority = "supplemental"
+priority = "explicit"
 
 [[tool.poetry.source]]
 name = "testpypi"
