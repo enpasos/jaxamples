@@ -840,13 +840,13 @@ def main() -> None:
                 "enable_rotation": True,
                 "max_rotation": 17.0,
                 # elastic local deformations
-                "enable_elastic": False,
+                "enable_elastic": True,
                 "elastic_alpha": 1.0,  # distortion intensity
                 "elastic_sigma": 0.6,  # smoothing
                 # rectangle erasing
-                "enable_rect_erasing": True,
-                "rect_erase_height": 6,
-                "rect_erase_width": 6,
+                "enable_rect_erasing": False,
+                "rect_erase_height": 2,
+                "rect_erase_width": 20,
             },
         },
         "model": {
@@ -861,8 +861,8 @@ def main() -> None:
             "kernel_size": 3,
             "strides": [1, 2, 2],
             "embedding_type": "conv",  # "patch" or "conv"
-            "embedding_dropout_rate": 0.1,
-            "attention_dropout_rate": 0.3,
+            "embedding_dropout_rate": 0.5,
+            "attention_dropout_rate": 0.5,
             "mlp_dropout_rate": 0.5,
         },
         "onnx": {
