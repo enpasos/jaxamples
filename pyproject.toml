@@ -11,25 +11,26 @@ python = ">=3.10"
 # Pinned JAX and related libraries based on working environment
 jax = { version = ">=0.6.0", extras = ["cuda12"] }
 flax = ">=0.10.6"
-ml_dtypes = ">=0.5.1" # Pinned based on poetry show
+ml_dtypes = ">=0.5.1" 
 optax = ">=0.2.4"
 orbax-checkpoint = ">=0.11.6"
 orbax-export = ">=0.0.6"
 netron = ">=8.1.9" # Keep as >=, minor updates unlikely to cause segfault
-onnx = ">=1.17.0" # Pinned based on poetry show
-onnxruntime = ">=1.22.0" # Pinned based on poetry show
-matplotlib = ">=3.10.0" # Pinned based on poetry show
-jax2onnx = ">=0.5.2" # Pinned based on poetry show
+onnx = ">=1.17.0" 
+onnxruntime = ">=1.22.0" 
+matplotlib = ">=3.10.0" 
+jax2onnx = ">=0.6.2"  
+# jax2onnx = { path = "../jax2onnx", develop = true }
+
 # Keep PyTorch versions as they are, source correctly points to CPU
 torch = { version = "2.5.1", source = "pytorch" }
 torchvision = { version = "0.20.1", source = "pytorch" }
-
 
 [tool.poetry.group.test]
 optional = true
 
 [tool.poetry.group.test.dependencies]
-treescope = "==0.1.9" # Pinned based on poetry show
+treescope = "==0.1.9" 
 matplotlib = "==3.10.0" # Already pinned correctly
 
 [tool.poetry]

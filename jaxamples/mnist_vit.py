@@ -838,7 +838,7 @@ def main() -> None:
                 "scale_max_y": 1.15,
                 # rotation in degrees
                 "enable_rotation": True,
-                "max_rotation": 17.0,
+                "max_rotation": 13.0,
                 # elastic local deformations
                 "enable_elastic": True,
                 "elastic_alpha": 1.0,  # distortion intensity
