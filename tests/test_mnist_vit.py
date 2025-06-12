@@ -161,7 +161,10 @@ def test_augment_data_batch(dummy_dataset):
         enable_elastic=True,
         enable_rotation=True,
         enable_scaling=True,
-        enable_translation=True,
+        enable_translation=True,    
+        enable_rect_erasing=False,          
+        rect_erase_height=2,                
+        rect_erase_width=20                
     )
     augmented_batch = mnist_vit.augment_data_batch(
         dummy_dataset, rng_key, augmentation_params
@@ -287,6 +290,9 @@ def test_train_model():
                 "enable_rotation": True,
                 "enable_scaling": True,
                 "enable_translation": True,
+                "enable_rect_erasing": False,       
+                "rect_erase_height":2,                
+                "rect_erase_width":20                
             },
         }
     }
