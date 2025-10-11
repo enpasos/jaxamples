@@ -1,13 +1,16 @@
 # file: jaxamples/mnist_vit.py
 import functools
 import os
+
+# Suppress XLA compilation warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import re
 import shutil
 import zipfile
 import warnings
 from typing import Dict, Tuple, List, Any
-from collections import namedtuple
-
+from flax.struct import dataclass, field
 
 import jax.lax
 import math
@@ -165,26 +168,26 @@ def visualize_augmented_images(
     plt.close(fig)
 
 
-AugmentationParams = namedtuple(
-    "AugmentationParams",
-    [
-        "max_translation",
-        "scale_min_x",
-        "scale_max_x",
-        "scale_min_y",
-        "scale_max_y",
-        "max_rotation",
-        "elastic_alpha",
-        "elastic_sigma",
-        "enable_elastic",
-        "enable_rotation",
-        "enable_scaling",
-        "enable_translation",
-        "enable_rect_erasing",
-        "rect_erase_height",
-        "rect_erase_width",
-    ],
-)
+@dataclass
+class AugmentationParams:
+    # dynamic hyperparameters
+    max_translation: float
+    scale_min_x:    float
+    scale_max_x:    float
+    scale_min_y:    float
+    scale_max_y:    float
+    max_rotation:   float
+    elastic_alpha:  float
+    elastic_sigma:  float
+
+    # static switches — won't cause retrace when changed
+    enable_elastic:      bool = field(pytree_node=False)
+    enable_rotation:     bool = field(pytree_node=False)
+    enable_scaling:      bool = field(pytree_node=False)
+    enable_translation:  bool = field(pytree_node=False)
+    enable_rect_erasing: bool = field(pytree_node=False)
+    rect_erase_height:   int  = field(pytree_node=False)
+    rect_erase_width:    int  = field(pytree_node=False)
 
 
 @functools.partial(jax.jit, static_argnames=("augmentation_params",))
@@ -311,7 +314,10 @@ def train_step(
     grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
     (loss, logits), grads = grad_fn(model, batch)
     metrics.update(loss=loss, logits=logits, labels=batch["label"])
-    optimizer.update(grads, learning_rate=learning_rate, weight_decay=weight_decay)
+    # Update hyperparameters before calling update
+    optimizer.opt_state.hyperparams['learning_rate'] = learning_rate
+    optimizer.opt_state.hyperparams['weight_decay'] = weight_decay
+    optimizer.update(model, grads)
 
 
 @nnx.jit
@@ -409,9 +415,11 @@ def lr_schedule(epoch: int, config: Dict) -> float:
 def create_optimizer(
     model: nnx.Module, learning_rate: float, weight_decay: float
 ) -> nnx.Optimizer:
-    return nnx.Optimizer(
-        model, optax.adamw(learning_rate=learning_rate, weight_decay=weight_decay)
+    # Use inject_hyperparams to allow dynamic learning rate changes
+    tx = optax.inject_hyperparams(optax.adamw)(
+        learning_rate=learning_rate, weight_decay=weight_decay
     )
+    return nnx.Optimizer(model, tx, wrt=nnx.Param)
 
 
 # =============================================================================
@@ -614,15 +622,19 @@ def train_model(
         "test_accuracy_mean": [],
         "test_accuracy_spread": [],
     }
-    optimizer = create_optimizer(model, config["training"]["base_learning_rate"], 1e-4)
     augmentation_params = AugmentationParams(**config["training"]["augmentation"])
+    
+    # Create optimizer once
+    initial_lr = config["training"]["base_learning_rate"]
+    optimizer = create_optimizer(model, initial_lr, 1e-4)
 
     for epoch in range(
         start_epoch, start_epoch + config["training"]["num_epochs_to_train_now"]
     ):
         learning_rate = lr_schedule(epoch, config)
-        print(f"Epoch: {epoch}, Learning rate: {learning_rate}")
         weight_decay = min(1e-4, learning_rate / 10)
+        
+        print(f"Epoch: {epoch}, Learning rate: {learning_rate:.6e}")
 
         metrics.reset()
         for batch in train_dataloader:
@@ -832,17 +844,17 @@ def main() -> None:
                 "max_translation": 3.0,
                 # scaling factors in x (horizontal) and y (vertical) directions
                 "enable_scaling": True,
-                "scale_min_x": 0.7,
+                "scale_min_x": 0.85,
                 "scale_max_x": 1.15,
                 "scale_min_y": 0.85,
                 "scale_max_y": 1.15,
                 # rotation in degrees
                 "enable_rotation": True,
-                "max_rotation": 13.0,
+                "max_rotation": 15.0,
                 # elastic local deformations
                 "enable_elastic": True,
                 "elastic_alpha": 1.0,  # distortion intensity
-                "elastic_sigma": 0.6,  # smoothing
+                "elastic_sigma": 0.5,  # smoothing
                 # rectangle erasing
                 "enable_rect_erasing": False,
                 "rect_erase_height": 2,
