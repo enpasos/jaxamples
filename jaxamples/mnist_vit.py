@@ -6,8 +6,6 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import re
-import shutil
-import zipfile
 import warnings
 from typing import Dict, Tuple, List, Any
 from flax.struct import dataclass, field
@@ -23,7 +21,7 @@ import onnx
 import optax
 import torchvision
 import treescope
-from flax import nnx
+from flax import nnx, serialization
 from jax.image import scale_and_translate
 
 from torch.utils.data import DataLoader
@@ -32,7 +30,6 @@ from jax2onnx import to_onnx, allclose
 from jax2onnx.plugins.examples.nnx.vit import VisionTransformer
 
 # from jaxamples.vit import VisionTransformer
-import orbax.checkpoint as orbax
 
 import matplotlib
 import numpy as np
@@ -736,40 +733,58 @@ def save_model_visualization(model: nnx.Module) -> None:
     print(f"TreeScope HTML saved to '{output_file}'.")
 
 
+CKPT_EXTENSION = ".msgpack"
+
+
+def _to_numpy_tree(tree: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert(x):
+        value = jax.device_get(x)
+        try:
+            value = jax.random.key_data(value)
+        except TypeError:
+            pass
+        return np.asarray(value)
+
+    return jax.tree_util.tree_map(_convert, tree)
+
+
 def save_model(model: nnx.Module, ckpt_dir: str, epoch: int):
-    state_dir = f"{ckpt_dir}/epoch_{epoch}"
-    if not os.path.exists(state_dir):
-        os.makedirs(state_dir)
-    keys, state = nnx.state(model, nnx.RngKey, ...)
-    keys = jax.tree.map(jax.random.key_data, keys)
-    checkpointer = orbax.PyTreeCheckpointer()
-    checkpointer.save(state_dir, state, force=True)
-    zip_path = f"{ckpt_dir}/epoch_{epoch}.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(state_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, start=state_dir)
-                zipf.write(file_path, arcname)
-    shutil.rmtree(state_dir)
-    print(f"Model checkpoint for epoch {epoch} saved to {zip_path}")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    keys_state, params_state = nnx.state(model, nnx.RngKey, ...)
+    payload = {
+        "keys": _to_numpy_tree(nnx.to_pure_dict(keys_state)),
+        "state": _to_numpy_tree(nnx.to_pure_dict(params_state)),
+    }
+    ckpt_path = os.path.join(ckpt_dir, f"epoch_{epoch}{CKPT_EXTENSION}")
+    with open(ckpt_path, "wb") as fout:
+        fout.write(serialization.to_bytes(payload))
+    print(f"Model checkpoint for epoch {epoch} saved to {ckpt_path}")
 
 
 def load_model(model: nnx.Module, ckpt_dir: str, epoch: int, seed: int) -> nnx.Module:
-    zip_path = f"{ckpt_dir}/epoch_{epoch}.zip"
-    if not os.path.exists(zip_path):
-        raise FileNotFoundError(f"Checkpoint file not found at {zip_path}")
-    extract_dir = f"{ckpt_dir}/epoch_{epoch}_temp"
-    if not os.path.exists(extract_dir):
-        os.makedirs(extract_dir)
-    with zipfile.ZipFile(zip_path, "r") as zipf:
-        zipf.extractall(extract_dir)
-    keys, state = nnx.state(model, nnx.RngKey, ...)
-    checkpointer = orbax.PyTreeCheckpointer()
-    restored_state = checkpointer.restore(extract_dir, item=state)
-    nnx.update(model, keys, restored_state)
-    shutil.rmtree(extract_dir)
-    print(f"Model checkpoint for epoch {epoch} loaded from {zip_path}")
+    ckpt_path = os.path.join(ckpt_dir, f"epoch_{epoch}{CKPT_EXTENSION}")
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint file not found at {ckpt_path}")
+
+    with open(ckpt_path, "rb") as fin:
+        raw_bytes = fin.read()
+
+    keys_state, params_state = nnx.state(model, nnx.RngKey, ...)
+    template = {
+        "keys": nnx.to_pure_dict(keys_state),
+        "state": nnx.to_pure_dict(params_state),
+    }
+    restored_payload = serialization.from_bytes(template, raw_bytes)
+    restored_keys = jax.tree_util.tree_map(
+        lambda x: jax.random.wrap_key_data(x)
+        if isinstance(x, np.ndarray) and x.dtype == np.uint32 and x.shape and x.shape[-1] == 2
+        else x,
+        restored_payload["keys"],
+    )
+    nnx.replace_by_pure_dict(keys_state, restored_keys)
+    nnx.replace_by_pure_dict(params_state, restored_payload["state"])
+    nnx.update(model, keys_state, params_state)
+    print(f"Model checkpoint for epoch {epoch} loaded from {ckpt_path}")
     return model
 
 
@@ -783,6 +798,7 @@ def get_latest_checkpoint_epoch(ckpt_dir: str) -> int:
         int(match.group(1))
         for name in files_and_dirs
         if (match := epoch_pattern.search(name))
+        and name.endswith(CKPT_EXTENSION)
     ]
     return max(epochs, default=0)
 

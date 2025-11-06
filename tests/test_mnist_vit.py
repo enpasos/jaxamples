@@ -315,7 +315,10 @@ def test_save_and_load_model():
     with tempfile.TemporaryDirectory() as temp_dir:
         ckpt_dir = temp_dir
         mnist_vit.save_model(model, ckpt_dir, epoch=1)
-        assert os.path.exists(os.path.join(ckpt_dir, "epoch_1.zip"))
+        checkpoint_path = os.path.join(
+            ckpt_dir, f"epoch_1{mnist_vit.CKPT_EXTENSION}"
+        )
+        assert os.path.exists(checkpoint_path)
         model2 = create_model()
         mnist_vit.load_model(model2, ckpt_dir, epoch=1, seed=0)
         original_state = nnx.state(model, nnx.RngKey, ...)
