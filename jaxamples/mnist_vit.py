@@ -7,7 +7,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import re
 import warnings
-from typing import Dict, Tuple, List, Any
+from typing import Dict, Tuple, List, Any, Optional
 from flax.struct import dataclass, field
 
 import jax.lax
@@ -25,9 +25,9 @@ from flax import nnx, serialization
 from jax.image import scale_and_translate
 
 from torch.utils.data import DataLoader
-from torchvision import transforms
 from jax2onnx import to_onnx, allclose
 from jax2onnx.plugins.examples.nnx.vit import VisionTransformer
+from jaxamples.mnist_data import get_mnist_transform
 
 # from jaxamples.vit import VisionTransformer
 
@@ -50,9 +50,7 @@ warnings.filterwarnings(
 
 
 def get_dataset_torch_dataloaders(batch_size: int, data_dir: str = "./data"):
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-    )
+    transform = get_mnist_transform()
     train_ds = torchvision.datasets.MNIST(
         data_dir, train=True, download=True, transform=transform
     )
@@ -156,7 +154,15 @@ def visualize_augmented_images(
         num_images (int, optional): The number of images to display. Defaults to 9.
     """
 
-    fig, axes = plt.subplots(1, num_images, figsize=(15, 5))
+    num_available_images = int(ds["image"].shape[0])
+    num_images = min(num_images, num_available_images)
+    if num_images == 0:
+        print("No augmented images to visualize.")
+        return
+
+    fig, axes = plt.subplots(1, num_images, figsize=(max(1, num_images) * 1.8, 5))
+    if num_images == 1:
+        axes = [axes]
     for i, ax in enumerate(axes):
         ax.imshow(ds["image"][i, ..., 0], cmap="gray")
         ax.axis("off")
@@ -636,7 +642,7 @@ def train_model(
         metrics.reset()
         for batch in train_dataloader:
             batch = jax_collate(batch)
-            _, dropout_rng = random.split(rng_key)
+            rng_key, dropout_rng = random.split(rng_key)
             batch = augment_data_batch(batch, dropout_rng, augmentation_params)
             train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
 
@@ -716,8 +722,12 @@ def visualize_results(
         test_batch = jax_collate(test_batch)
         break
     preds = pred_step(model, test_batch)
+    num_examples = min(25, int(test_batch["image"].shape[0]))
     fig, axs = plt.subplots(5, 5, figsize=(12, 12))
     for i, ax in enumerate(axs.flatten()):
+        if i >= num_examples:
+            ax.axis("off")
+            continue
         ax.imshow(test_batch["image"][i, ..., 0], cmap="gray")
         ax.set_title(f"Prediction: {preds[i]}, Label: {test_batch['label'][i]}")
         ax.axis("off")
@@ -788,10 +798,10 @@ def load_model(model: nnx.Module, ckpt_dir: str, epoch: int, seed: int) -> nnx.M
     return model
 
 
-def get_latest_checkpoint_epoch(ckpt_dir: str) -> int:
+def get_latest_checkpoint_epoch(ckpt_dir: str) -> Optional[int]:
     ckpt_dir = os.path.abspath(ckpt_dir)
     if not os.path.exists(ckpt_dir):
-        return 0
+        return None
     files_and_dirs = os.listdir(ckpt_dir)
     epoch_pattern = re.compile(r"epoch_(\d+)")
     epochs = [
@@ -800,14 +810,25 @@ def get_latest_checkpoint_epoch(ckpt_dir: str) -> int:
         if (match := epoch_pattern.search(name))
         and name.endswith(CKPT_EXTENSION)
     ]
-    return max(epochs, default=0)
+    return max(epochs) if epochs else None
+
+
+def resolve_checkpoint_resume(ckpt_dir: str) -> Tuple[Optional[int], int]:
+    latest_checkpoint_epoch = get_latest_checkpoint_epoch(ckpt_dir)
+    start_epoch = 0 if latest_checkpoint_epoch is None else latest_checkpoint_epoch + 1
+    return latest_checkpoint_epoch, start_epoch
 
 
 def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
     """Test the exported ONNX model with ONNX Runtime and the MNIST test set."""
     session = ort.InferenceSession(onnx_model_path)
-    input_name = session.get_inputs()[0].name
+    input_infos = session.get_inputs()
+    input_name = input_infos[0].name
     output_name = session.get_outputs()[0].name
+    deterministic_input = next(
+        (inp.name for inp in input_infos if inp.name == "deterministic"),
+        None,
+    )
 
     correct = 0
     total = 0
@@ -818,7 +839,9 @@ def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
         labels = labels.numpy()
         images = images.transpose(0, 2, 3, 1)  # Convert to NHWC format
 
-        inputs = {input_name: images, "deterministic": np.array(True)}
+        inputs = {input_name: images}
+        if deterministic_input is not None:
+            inputs[deterministic_input] = np.array(True)
         preds = session.run([output_name], inputs)[0]
         preds = np.argmax(preds, axis=1)
 
@@ -913,24 +936,37 @@ def main() -> None:
     rngs = nnx.Rngs(config["seed"])
     rng_key = rngs.as_jax_rng()
 
-    start_epoch = get_latest_checkpoint_epoch(config["training"]["checkpoint_dir"])
+    latest_checkpoint_epoch, start_epoch = resolve_checkpoint_resume(
+        config["training"]["checkpoint_dir"]
+    )
     config["training"]["start_epoch"] = start_epoch
-    print(f"Resuming from epoch: {start_epoch}.")
+    if latest_checkpoint_epoch is None:
+        print("No checkpoint found. Starting from scratch.")
+    else:
+        print(
+            f"Loaded checkpoint from epoch {latest_checkpoint_epoch}. "
+            f"Continuing at epoch {start_epoch}."
+        )
 
     # Create the model using parameters from the config.
     model = VisionTransformer(**config["model"])
 
-    if start_epoch > 0:
+    if latest_checkpoint_epoch is not None:
         try:
             model = load_model(
-                model, config["training"]["checkpoint_dir"], start_epoch, config["seed"]
+                model,
+                config["training"]["checkpoint_dir"],
+                latest_checkpoint_epoch,
+                config["seed"],
             )
-            print(f"Loaded model from epoch {start_epoch}")
+            print(f"Loaded model from epoch {latest_checkpoint_epoch}")
         except FileNotFoundError:
             print(
-                f"Checkpoint for epoch {start_epoch} not found, starting from scratch."
+                f"Checkpoint for epoch {latest_checkpoint_epoch} not found, "
+                "starting from scratch."
             )
             start_epoch = 0
+            config["training"]["start_epoch"] = 0
             model = VisionTransformer(**config["model"])
 
     metrics = nnx.MultiMetric(

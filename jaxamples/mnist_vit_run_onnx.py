@@ -2,6 +2,8 @@ import numpy as np
 import onnxruntime as ort
 from torch.utils.data import DataLoader
 
+from jaxamples.mnist_data import get_mnist_transform
+
 
 def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
     """Test the exported ONNX model with ONNX Runtime and the MNIST test set."""
@@ -98,7 +100,7 @@ def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
 
 def main(args=None):
     import argparse
-    from torchvision import datasets, transforms
+    from torchvision import datasets
 
     if args is None:
         parser = argparse.ArgumentParser(description="Test ONNX MNIST ViT model")
@@ -135,11 +137,7 @@ def main(args=None):
         print(f"Overriding batch size to {fixed_batch_size} to match ONNX model.")
         batch_size = fixed_batch_size
 
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-        ]
-    )
+    transform = get_mnist_transform()
     test_dataset = datasets.MNIST(
         root=args.data_dir if args else "./data",
         train=False,

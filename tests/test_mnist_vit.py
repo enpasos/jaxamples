@@ -1,5 +1,6 @@
 # file: tests/test_mnist_vit.py
 
+from pathlib import Path
 import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -14,6 +15,8 @@ import tempfile  # for save/load model tests
 from jaxamples import mnist_vit
 
 from flax import nnx  # Import flax
+
+from jaxamples.mnist_data import get_mnist_transform
 
 
 # Fixture for a small, deterministic dataset. Avoids downloading MNIST during tests.
@@ -48,19 +51,41 @@ def create_model():
     model_params = {
         "height": 28,
         "width": 28,
-        "num_hiddens": 256,
-        "num_layers": 6,
-        "num_heads": 8,
-        "mlp_dim": 512,
+        "num_hiddens": 64,
+        "num_layers": 2,
+        "num_heads": 4,
+        "mlp_dim": 128,
         "num_classes": 10,
-        "dropout_rate": 0.8,
+        "embed_dims": [16, 32, 64],
+        "kernel_size": 3,
+        "strides": [1, 2, 2],
+        "embedding_type": "conv",
+        "embedding_dropout_rate": 0.1,
+        "attention_dropout_rate": 0.1,
+        "mlp_dropout_rate": 0.1,
         "rngs": nnx.Rngs(0),
     }
     return mnist_vit.VisionTransformer(**model_params)
 
 
 # TESTED
-def test_get_dataset_torch_dataloaders():
+def test_get_dataset_torch_dataloaders(monkeypatch):
+    class DummyMNIST:
+        def __init__(self, root, train, download, transform):
+            self.transform = transform
+            dataset_size = 64 if train else 1000
+            self.images = np.full((dataset_size, 28, 28), 255, dtype=np.uint8)
+            self.labels = torch.arange(dataset_size, dtype=torch.int64) % 10
+
+        def __len__(self):
+            return len(self.labels)
+
+        def __getitem__(self, idx):
+            image = self.transform(self.images[idx]) if self.transform else self.images[idx]
+            return image, self.labels[idx]
+
+    monkeypatch.setattr(mnist_vit.torchvision.datasets, "MNIST", DummyMNIST)
+
     batch_size = 32  # Use a smaller batch size for testing
     train_dataloader, test_dataloader = mnist_vit.get_dataset_torch_dataloaders(
         batch_size
@@ -90,6 +115,18 @@ def test_get_dataset_torch_dataloaders():
         break  # Only check the first batch
 
     print("get_dataset_torch_dataloaders test: PASSED")
+
+
+def test_get_mnist_transform():
+    transform = get_mnist_transform()
+    transformed = transform(np.full((28, 28), 255, dtype=np.uint8))
+    expected_value = (1.0 - 0.1307) / 0.3081
+
+    assert transformed.shape == (1, 28, 28)
+    assert transformed.dtype == torch.float32
+    assert torch.allclose(
+        transformed.mean(), torch.tensor(expected_value, dtype=torch.float32), atol=1e-4
+    )
 
 
 # TESTED
@@ -179,6 +216,22 @@ def test_augment_data_batch(dummy_dataset):
     # Check that the augmented images are different from the originals
     assert not jnp.allclose(augmented_batch["image"], dummy_dataset["image"])
     print("augment_data_batch test: PASSED")
+
+
+def test_visualize_augmented_images_handles_small_batch(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("output", exist_ok=True)
+
+    mnist_vit.visualize_augmented_images(
+        {
+            "image": jnp.ones((2, 28, 28, 1), dtype=jnp.float32),
+            "label": jnp.array([0, 1], dtype=jnp.int32),
+        },
+        epoch=3,
+        num_images=9,
+    )
+
+    assert Path("output/augmented_images_epoch3.png").exists()
 
 
 # TESTED
@@ -310,6 +363,74 @@ def test_train_model():
     print("train_model test: PASSED")
 
 
+def test_train_model_uses_fresh_rng_per_batch(monkeypatch, tmp_path):
+    captured_keys = []
+
+    def fake_augment_data_batch(batch, rng_key, augmentation_params):
+        captured_keys.append(tuple(np.asarray(jax.random.key_data(rng_key)).tolist()))
+        return batch
+
+    class FakeMetrics:
+        def reset(self):
+            pass
+
+        def compute(self):
+            return {"loss": jnp.array(0.0), "accuracy": jnp.array(0.0)}
+
+    monkeypatch.setattr(mnist_vit, "augment_data_batch", fake_augment_data_batch)
+    monkeypatch.setattr(mnist_vit, "train_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "eval_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "visualize_augmented_images", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mnist_vit, "visualize_incorrect_classifications", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(mnist_vit, "save_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "save_test_accuracy_metrics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mnist_vit, "load_and_plot_test_accuracy_metrics", lambda *args, **kwargs: None
+    )
+
+    train_dataloader, test_dataloader = get_dummy_dataloaders(batch_size=4)
+    config = {
+        "training": {
+            "base_learning_rate": 0.0001,
+            "start_epoch": 0,
+            "num_epochs_to_train_now": 1,
+            "checkpoint_dir": str(tmp_path),
+            "augmentation": {
+                "max_translation": 2.0,
+                "scale_min_x": 0.8,
+                "scale_max_x": 1.2,
+                "scale_min_y": 0.8,
+                "scale_max_y": 1.2,
+                "max_rotation": 15.0,
+                "elastic_alpha": 0.5,
+                "elastic_sigma": 0.6,
+                "enable_elastic": True,
+                "enable_rotation": True,
+                "enable_scaling": True,
+                "enable_translation": True,
+                "enable_rect_erasing": False,
+                "rect_erase_height": 2,
+                "rect_erase_width": 20,
+            },
+        }
+    }
+
+    mnist_vit.train_model(
+        create_model(),
+        0,
+        FakeMetrics(),
+        config,
+        train_dataloader,
+        test_dataloader,
+        jax.random.PRNGKey(0),
+    )
+
+    assert len(captured_keys) == len(train_dataloader)
+    assert len(set(captured_keys)) == len(captured_keys)
+
+
 def test_save_and_load_model():
     model = create_model()
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -330,3 +451,15 @@ def test_save_and_load_model():
             trees_are_equal
         ), "Loaded state does not match saved state."
         print("test_save_and_load_model: PASSED")
+
+
+def test_resolve_checkpoint_resume(tmp_path):
+    checkpoint_dir = str(tmp_path)
+
+    assert mnist_vit.resolve_checkpoint_resume(checkpoint_dir) == (None, 0)
+
+    (tmp_path / f"epoch_0{mnist_vit.CKPT_EXTENSION}").write_bytes(b"epoch0")
+    assert mnist_vit.resolve_checkpoint_resume(checkpoint_dir) == (0, 1)
+
+    (tmp_path / f"epoch_7{mnist_vit.CKPT_EXTENSION}").write_bytes(b"epoch7")
+    assert mnist_vit.resolve_checkpoint_resume(checkpoint_dir) == (7, 8)
