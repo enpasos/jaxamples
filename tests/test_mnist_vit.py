@@ -13,6 +13,7 @@ import tempfile  # for save/load model tests
 
 # Import the functions to be tested from your main file:
 from jaxamples import mnist_vit
+from jaxamples import mnist_training
 
 from flax import nnx  # Import flax
 
@@ -325,35 +326,30 @@ def test_train_model(tmp_path, monkeypatch):
     )
     train_dataloader, test_dataloader = get_dummy_dataloaders(batch_size)
     rng_key = jax.random.PRNGKey(0)
-    config = {
-        "training": {
-            "base_learning_rate": 0.0001,
-            "start_epoch": 0,
-            "num_epochs_to_train_now": 2,
-            "warmup_epochs": 0,
-            "checkpoint_dir": os.path.abspath("./data/test_checkpoints/"),
-            "batch_size": batch_size,
-            "data_dir": "./data",
-            # Add the missing augmentation configuration
-            "augmentation": {
-                "max_translation": 2.0,
-                "scale_min_x": 0.8,
-                "scale_max_x": 1.2,
-                "scale_min_y": 0.8,
-                "scale_max_y": 1.2,
-                "max_rotation": 15.0,
-                "elastic_alpha": 0.5,
-                "elastic_sigma": 0.6,
-                "enable_elastic": True,
-                "enable_rotation": True,
-                "enable_scaling": True,
-                "enable_translation": True,
-                "enable_rect_erasing": False,       
-                "rect_erase_height":2,                
-                "rect_erase_width":20                
-            },
-        }
-    }
+    config = mnist_vit.get_default_config()
+    config.training.base_learning_rate = 0.0001
+    config.training.start_epoch = 0
+    config.training.num_epochs_to_train_now = 2
+    config.training.warmup_epochs = 0
+    config.training.checkpoint_dir = os.path.abspath("./data/test_checkpoints/")
+    config.training.batch_size = batch_size
+    config.training.data_dir = "./data"
+    config.training.augmentation.max_translation = 2.0
+    config.training.augmentation.scale_min_x = 0.8
+    config.training.augmentation.scale_max_x = 1.2
+    config.training.augmentation.scale_min_y = 0.8
+    config.training.augmentation.scale_max_y = 1.2
+    config.training.augmentation.max_rotation = 15.0
+    config.training.augmentation.elastic_alpha = 0.5
+    config.training.augmentation.elastic_sigma = 0.6
+    config.training.augmentation.enable_elastic = True
+    config.training.augmentation.enable_rotation = True
+    config.training.augmentation.enable_scaling = True
+    config.training.augmentation.enable_translation = True
+    config.training.augmentation.enable_rect_erasing = False
+    config.training.augmentation.rect_erase_height = 2
+    config.training.augmentation.rect_erase_width = 20
+
     metrics_history = mnist_vit.train_model(
         model, 0, metrics, config, train_dataloader, test_dataloader, rng_key
     )
@@ -434,6 +430,85 @@ def test_train_model_uses_fresh_rng_per_batch(monkeypatch, tmp_path):
 
     assert len(captured_keys) == len(train_dataloader)
     assert len(set(captured_keys)) == len(captured_keys)
+
+
+def test_train_model_uses_artifact_dir_from_config(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeMetrics:
+        def reset(self):
+            pass
+
+        def compute(self):
+            return {"loss": jnp.array(0.0), "accuracy": jnp.array(0.0)}
+
+    config = mnist_vit.get_default_config()
+    config.training.num_epochs_to_train_now = 1
+    config.training.checkpoint_dir = str(tmp_path / "checkpoints")
+    config.training.output_dir = str(tmp_path / "artifacts")
+
+    monkeypatch.setattr(mnist_vit, "augment_data_batch", lambda batch, *_args: batch)
+    monkeypatch.setattr(mnist_vit, "train_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "eval_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "save_model", lambda *args, **kwargs: None)
+
+    def fake_visualize_augmented_images(_batch, _epoch, num_images=9, output_dir="output"):
+        captured["augmented_output_dir"] = output_dir
+        captured["augmented_num_images"] = num_images
+
+    def fake_save_test_accuracy_metrics(_metrics_history, _epoch, output_csv="output/test_accuracy_metrics.csv"):
+        captured["metrics_csv"] = output_csv
+
+    def fake_visualize_incorrect_classifications(
+        _model, _test_loader, _epoch, figsize=(15, 5), output_dir="output"
+    ):
+        captured["incorrect_output_dir"] = output_dir
+        captured["incorrect_figsize"] = figsize
+
+    def fake_load_and_plot_test_accuracy_metrics(csv_filepath, output_fig):
+        captured["plot_csv"] = csv_filepath
+        captured["plot_fig"] = output_fig
+
+    monkeypatch.setattr(
+        mnist_vit, "visualize_augmented_images", fake_visualize_augmented_images
+    )
+    monkeypatch.setattr(
+        mnist_vit, "save_test_accuracy_metrics", fake_save_test_accuracy_metrics
+    )
+    monkeypatch.setattr(
+        mnist_vit,
+        "visualize_incorrect_classifications",
+        fake_visualize_incorrect_classifications,
+    )
+    monkeypatch.setattr(
+        mnist_vit,
+        "load_and_plot_test_accuracy_metrics",
+        fake_load_and_plot_test_accuracy_metrics,
+    )
+
+    train_dataloader, test_dataloader = get_dummy_dataloaders(batch_size=4)
+
+    mnist_vit.train_model(
+        create_model(),
+        0,
+        FakeMetrics(),
+        config,
+        train_dataloader,
+        test_dataloader,
+        jax.random.PRNGKey(0),
+    )
+
+    assert captured["augmented_output_dir"] == str(tmp_path / "artifacts")
+    assert captured["incorrect_output_dir"] == str(tmp_path / "artifacts")
+    assert captured["metrics_csv"] == str(
+        tmp_path / "artifacts" / "test_accuracy_metrics.csv"
+    )
+    assert captured["plot_csv"] == str(
+        tmp_path / "artifacts" / "test_accuracy_metrics.csv"
+    )
+    assert captured["plot_fig"] == str(
+        tmp_path / "artifacts" / "test_accuracy_metrics.png"
+    )
 
 
 def test_train_model_fails_fast_on_empty_train_loader(tmp_path):
@@ -571,3 +646,27 @@ def test_visualize_results_skips_prediction_examples_for_empty_test_loader(
 
     assert Path("output/results_epoch_2.png").exists()
     assert not Path("output/prediction_example_epoch_2.png").exists()
+
+
+def test_visualize_incorrect_classifications_caps_large_result_set(
+    tmp_path, monkeypatch
+):
+    images = torch.ones(60, 1, 28, 28, dtype=torch.float32)
+    labels = torch.ones(60, dtype=torch.int64)
+    dataset = TensorDataset(images, labels)
+    dataloader = DataLoader(dataset, batch_size=60, shuffle=False)
+
+    monkeypatch.setattr(
+        mnist_training,
+        "pred_step",
+        lambda _model, batch: jnp.zeros(batch["label"].shape, dtype=jnp.int32),
+    )
+
+    mnist_vit.visualize_incorrect_classifications(
+        create_model(),
+        dataloader,
+        epoch=4,
+        output_dir=str(tmp_path),
+    )
+
+    assert (tmp_path / "incorrect_classifications_epoch4.png").exists()

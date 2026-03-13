@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  POETRY_NO_INTERACTION: "1"
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Poetry
+        run: pip install poetry==2.1.3
+
+      - name: Cache Poetry environment
+        uses: actions/cache@v4
+        with:
+          path: |
+            .venv
+            ~/.cache/pypoetry
+          key: ${{ runner.os }}-py3.12-poetry-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Validate packaging metadata
+        run: poetry check
+
+      - name: Compile sources
+        run: poetry run python -m compileall jaxamples tests
+
+      - name: Lint
+        run: poetry run ruff check jaxamples tests
+
+      - name: Run tests
+        run: poetry run pytest -q
