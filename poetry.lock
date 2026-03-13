@@ -2831,7 +2831,7 @@ version = "0.1.9"
 description = "Treescope: An interactive HTML pretty-printer for ML research in IPython notebooks."
 optional = false
 python-versions = ">=3.10"
-groups = ["main", "test"]
+groups = ["main"]
 files = [
     {file = "treescope-0.1.9-py3-none-any.whl", hash = "sha256:68677013a9f0228212fccf835f3fb037be07ae8b4c5f6f58eefab11198f83cf7"},
     {file = "treescope-0.1.9.tar.gz", hash = "sha256:ba6cdbdc9c5b52691d5f3bb4c5d5c7daa5627119acac8640b46d37e6aabe63a6"},
@@ -3013,4 +3013,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "b7b5e45dcf0b1598b0ea8523a073eb9650e433b2cb74037edf0279f245d57838"
+content-hash = "ec92224bfdbb1b90b843bed208f14eba2101855ac6f0c70b75e4fd449d21310a"

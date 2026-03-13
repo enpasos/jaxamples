@@ -1,12 +1,9 @@
 # file: jaxamples/mnist_vit.py
 import functools
 import os
-
-# Suppress XLA compilation warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+from pathlib import Path
 
 import re
-import warnings
 from typing import Dict, Tuple, List, Any, Optional
 from flax.struct import dataclass, field
 
@@ -35,13 +32,7 @@ import matplotlib
 import numpy as np
 import onnxruntime as ort
 
-matplotlib.use("Agg")  # Use a non-interactive backend to avoid Tkinter-related issues
-import matplotlib.pyplot as plt
 import csv
-
-warnings.filterwarnings(
-    "ignore", message="Couldn't find sharding info under RestoreArgs.*"
-)
 
 
 # =============================================================================
@@ -64,6 +55,24 @@ def get_dataset_torch_dataloaders(batch_size: int, data_dir: str = "./data"):
         test_ds, batch_size=1000, shuffle=False, num_workers=0, drop_last=True
     )
     return train_dataloader, test_dataloader
+
+
+def _get_pyplot():
+    if "MPLBACKEND" not in os.environ and not os.environ.get("DISPLAY"):
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    return plt
+
+
+def _ensure_parent_dir(path: str | Path) -> Path:
+    resolved_path = Path(path)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    return resolved_path
+
+
+def _build_output_path(filename: str, output_dir: str = "output") -> Path:
+    return _ensure_parent_dir(Path(output_dir) / filename)
 
 
 def jax_collate(batch):
@@ -144,7 +153,10 @@ def elastic_deform(
 
 
 def visualize_augmented_images(
-    ds: Dict[str, jnp.ndarray], epoch: int, num_images: int = 9
+    ds: Dict[str, jnp.ndarray],
+    epoch: int,
+    num_images: int = 9,
+    output_dir: str = "output",
 ) -> None:
     """
     Displays a grid of augmented images.
@@ -160,6 +172,7 @@ def visualize_augmented_images(
         print("No augmented images to visualize.")
         return
 
+    plt = _get_pyplot()
     fig, axes = plt.subplots(1, num_images, figsize=(max(1, num_images) * 1.8, 5))
     if num_images == 1:
         axes = [axes]
@@ -167,7 +180,8 @@ def visualize_augmented_images(
         ax.imshow(ds["image"][i, ..., 0], cmap="gray")
         ax.axis("off")
 
-    plt.savefig(f"output/augmented_images_epoch{epoch}.png")
+    output_path = _build_output_path(f"augmented_images_epoch{epoch}.png", output_dir)
+    plt.savefig(output_path)
     plt.close(fig)
 
 
@@ -344,6 +358,7 @@ def visualize_incorrect_classifications(
     test_dataloader: DataLoader,
     epoch: int,
     figsize: Tuple[int, int] = (15, 5),
+    output_dir: str = "output",
 ) -> None:
     """
     Displays a grid of incorrectly classified images.
@@ -388,6 +403,7 @@ def visualize_incorrect_classifications(
         return
 
     # If 50 or fewer, display all
+    plt = _get_pyplot()
     fig, axes = plt.subplots(1, num_images, figsize=figsize)
     if num_images == 1:
         axes = [axes]  # Ensure axes is iterable for a single subplot
@@ -396,7 +412,10 @@ def visualize_incorrect_classifications(
         ax.set_title(f"{incorrect_labels[i]}\nbut\n{incorrect_preds[i]}")
         ax.axis("off")
 
-    plt.savefig(f"output/incorrect_classifications_epoch{epoch}.png")
+    output_path = _build_output_path(
+        f"incorrect_classifications_epoch{epoch}.png", output_dir
+    )
+    plt.savefig(output_path)
     plt.close(fig)
 
 
@@ -438,12 +457,14 @@ def compute_mean_and_spread(values: List[float]) -> Tuple[float, float]:
 
 
 def save_test_accuracy_metrics(
-    metrics_history: Dict[str, List[float]], epoch: int
+    metrics_history: Dict[str, List[float]],
+    epoch: int,
+    output_csv: str = "output/test_accuracy_metrics.csv",
 ) -> None:
     """Saves test accuracy, mean, and spread metrics to a CSV file."""
-    output_csv = "output/test_accuracy_metrics.csv"
-    file_exists = os.path.isfile(output_csv)
-    with open(output_csv, mode="a", newline="") as csv_file:
+    output_csv_path = _ensure_parent_dir(output_csv)
+    file_exists = output_csv_path.is_file()
+    with output_csv_path.open(mode="a", newline="") as csv_file:
         writer = csv.writer(csv_file)
         if not file_exists:
             writer.writerow(
@@ -484,7 +505,9 @@ def save_test_accuracy_metrics(
                 ),
             ]
         )
-    print(f"Test and train accuracy metrics for epoch {epoch} saved to {output_csv}")
+    print(
+        f"Test and train accuracy metrics for epoch {epoch} saved to {output_csv_path}"
+    )
 
 
 def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> None:
@@ -511,6 +534,7 @@ def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> N
                 test_acc.append(float(row["test_accuracy"]))
                 test_mean.append(float(row["test_mean_accuracy"]))
                 test_spread.append(float(row["test_spread_accuracy"]))
+    plt = _get_pyplot()
     plt.style.use("ggplot")
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.plot(epochs, test_acc, label="Test Accuracy", marker="o", linestyle="-")
@@ -539,20 +563,21 @@ def load_and_plot_test_accuracy_metrics(csv_filepath: str, output_fig: str) -> N
     ax.legend()
     ax.grid(True)
     fig.tight_layout()
-    plt.savefig(output_fig, dpi=300)
+    output_fig_path = _ensure_parent_dir(output_fig)
+    plt.savefig(output_fig_path, dpi=300)
     plt.close(fig)
-    print(f"Test and train accuracy graph saved to {output_fig}")
+    print(f"Test and train accuracy graph saved to {output_fig_path}")
 
 
 def save_and_plot_test_accuracy_metrics(
     metrics_history: Dict[str, List[float]],
+    output_csv: str = "output/test_accuracy_metrics.csv",
+    output_fig: str = "output/test_accuracy_metrics.png",
 ) -> None:
-    import csv
-
     # Write CSV file
-    output_csv = "output/test_accuracy_metrics.csv"
+    output_csv_path = _ensure_parent_dir(output_csv)
     num_epochs = len(metrics_history["test_accuracy"])
-    with open(output_csv, mode="w", newline="") as csv_file:
+    with output_csv_path.open(mode="w", newline="") as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(["epoch", "test_accuracy", "mean_accuracy", "spread_accuracy"])
         for i in range(num_epochs):
@@ -564,9 +589,10 @@ def save_and_plot_test_accuracy_metrics(
                     metrics_history["test_accuracy_spread"][i],
                 ]
             )
-    print(f"Test accuracy metrics saved to {output_csv}")
+    print(f"Test accuracy metrics saved to {output_csv_path}")
 
     # Generate a professional-style plot.
+    plt = _get_pyplot()
     plt.style.use("seaborn-paper")
     epochs = list(range(num_epochs))
     test_acc = metrics_history["test_accuracy"]
@@ -600,10 +626,10 @@ def save_and_plot_test_accuracy_metrics(
     ax.legend()
     ax.grid(True)
     fig.tight_layout()
-    output_fig = "output/test_accuracy_metrics.png"
-    plt.savefig(output_fig, dpi=300)
+    output_fig_path = _ensure_parent_dir(output_fig)
+    plt.savefig(output_fig_path, dpi=300)
     plt.close(fig)
-    print(f"Test accuracy graph saved to {output_fig}")
+    print(f"Test accuracy graph saved to {output_fig_path}")
 
 
 def train_model(
@@ -721,7 +747,9 @@ def visualize_results(
     model: nnx.Module,
     test_dataloader: DataLoader,
     epoch: int,
+    output_dir: str = "output",
 ):
+    plt = _get_pyplot()
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     ax1.set_title("Loss")
     ax2.set_title("Accuracy")
@@ -730,7 +758,8 @@ def visualize_results(
         ax2.plot(metrics_history[f"{dataset}_accuracy"], label=f"{dataset}_accuracy")
     ax1.legend()
     ax2.legend()
-    plt.savefig(f"output/results_epoch_{epoch}.png")
+    metrics_output_path = _build_output_path(f"results_epoch_{epoch}.png", output_dir)
+    plt.savefig(metrics_output_path)
     plt.close(fig)
 
     first_test_batch = None
@@ -751,16 +780,21 @@ def visualize_results(
         ax.imshow(first_test_batch["image"][i, ..., 0], cmap="gray")
         ax.set_title(f"Prediction: {preds[i]}, Label: {first_test_batch['label'][i]}")
         ax.axis("off")
-    plt.savefig(f"output/prediction_example_epoch_{epoch}.png")
+    prediction_output_path = _build_output_path(
+        f"prediction_example_epoch_{epoch}.png", output_dir
+    )
+    plt.savefig(prediction_output_path)
     plt.close(fig)
 
 
-def save_model_visualization(model: nnx.Module) -> None:
+def save_model_visualization(
+    model: nnx.Module, output_file: str = "treescope_output.html"
+) -> None:
     html_content = treescope.render_to_html(model)
-    output_file = "treescope_output.html"
-    with open(output_file, "w") as file:
+    output_path = _ensure_parent_dir(output_file)
+    with output_path.open("w") as file:
         file.write(html_content)
-    print(f"TreeScope HTML saved to '{output_file}'.")
+    print(f"TreeScope HTML saved to '{output_path}'.")
 
 
 CKPT_EXTENSION = ".msgpack"
@@ -878,9 +912,6 @@ def test_onnx_model(onnx_model_path: str, test_dataloader: DataLoader) -> None:
 
 
 def main() -> None:
-    os.makedirs("output", exist_ok=True)
-    os.makedirs("docs", exist_ok=True)
-
     # load_and_plot_test_accuracy_metrics("output/test_accuracy_metrics.csv", "output/test_accuracy_metrics.png")
 
     # jax.config.update("jax_log_compiles", True)  # Keep commented out unless debugging
@@ -1014,7 +1045,7 @@ def main() -> None:
     # onnx export
     inputs = config["onnx"]["input_shapes"]
     input_params = {"deterministic": True}
-    output_path = config["onnx"]["output_path"]
+    output_path = str(_ensure_parent_dir(config["onnx"]["output_path"]))
     print("Exporting model to ONNX...")
     onnx_model = to_onnx(model, inputs, input_params)
     onnx.save_model(onnx_model, output_path)

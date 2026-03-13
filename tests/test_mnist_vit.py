@@ -227,7 +227,6 @@ def test_augment_data_batch(dummy_dataset):
 
 def test_visualize_augmented_images_handles_small_batch(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    os.makedirs("output", exist_ok=True)
 
     mnist_vit.visualize_augmented_images(
         {
@@ -317,9 +316,8 @@ def test_pred_step():
     print("pred_step test: PASSED")
 
 
-def test_train_model():
-    os.makedirs("output", exist_ok=True)
-    os.makedirs("docs", exist_ok=True)
+def test_train_model(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     batch_size = 4
     model = create_model()
     metrics = nnx.MultiMetric(
@@ -558,7 +556,6 @@ def test_visualize_results_skips_prediction_examples_for_empty_test_loader(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    os.makedirs("output", exist_ok=True)
 
     mnist_vit.visualize_results(
         {
