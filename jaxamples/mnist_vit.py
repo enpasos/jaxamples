@@ -640,14 +640,22 @@ def train_model(
         print(f"Epoch: {epoch}, Learning rate: {learning_rate:.6e}")
 
         metrics.reset()
+        last_train_batch = None
         for batch in train_dataloader:
             batch = jax_collate(batch)
             rng_key, dropout_rng = random.split(rng_key)
             batch = augment_data_batch(batch, dropout_rng, augmentation_params)
             train_step(model, optimizer, metrics, batch, learning_rate, weight_decay)
+            last_train_batch = batch
+
+        if last_train_batch is None:
+            raise ValueError(
+                "train_dataloader did not yield any batches. "
+                "Reduce batch_size or disable drop_last."
+            )
 
         # Visualize augmented images once per epoch
-        visualize_augmented_images(batch, epoch, num_images=9)
+        visualize_augmented_images(last_train_batch, epoch, num_images=9)
 
         for metric, value in metrics.compute().items():
             metrics_history[f"train_{metric}"].append(value.item())
@@ -657,9 +665,16 @@ def train_model(
         )
 
         metrics.reset()
+        num_test_batches = 0
         for test_batch in test_dataloader:
             test_batch = jax_collate(test_batch)
             eval_step(model, metrics, test_batch)
+            num_test_batches += 1
+        if num_test_batches == 0:
+            raise ValueError(
+                "test_dataloader did not yield any batches. "
+                "Reduce batch_size or disable drop_last."
+            )
         for metric, value in metrics.compute().items():
             metrics_history[f"test_{metric}"].append(value.item())
         metrics.reset()
@@ -718,18 +733,23 @@ def visualize_results(
     plt.savefig(f"output/results_epoch_{epoch}.png")
     plt.close(fig)
 
+    first_test_batch = None
     for test_batch in test_dataloader:
-        test_batch = jax_collate(test_batch)
+        first_test_batch = jax_collate(test_batch)
         break
-    preds = pred_step(model, test_batch)
-    num_examples = min(25, int(test_batch["image"].shape[0]))
+    if first_test_batch is None:
+        print("No test batches available for prediction visualization. Skipping.")
+        return
+
+    preds = pred_step(model, first_test_batch)
+    num_examples = min(25, int(first_test_batch["image"].shape[0]))
     fig, axs = plt.subplots(5, 5, figsize=(12, 12))
     for i, ax in enumerate(axs.flatten()):
         if i >= num_examples:
             ax.axis("off")
             continue
-        ax.imshow(test_batch["image"][i, ..., 0], cmap="gray")
-        ax.set_title(f"Prediction: {preds[i]}, Label: {test_batch['label'][i]}")
+        ax.imshow(first_test_batch["image"][i, ..., 0], cmap="gray")
+        ax.set_title(f"Prediction: {preds[i]}, Label: {first_test_batch['label'][i]}")
         ax.axis("off")
     plt.savefig(f"output/prediction_example_epoch_{epoch}.png")
     plt.close(fig)

@@ -47,6 +47,13 @@ def get_dummy_dataloaders(batch_size: int):
     )  # Using same dataloader for train and test in the dummy case
 
 
+def get_empty_dataloader():
+    images = torch.empty((0, 1, 28, 28), dtype=torch.float32)
+    labels = torch.empty((0,), dtype=torch.int64)
+    dataset = TensorDataset(images, labels)
+    return DataLoader(dataset, batch_size=4, shuffle=False, drop_last=True)
+
+
 def create_model():
     model_params = {
         "height": 28,
@@ -431,6 +438,88 @@ def test_train_model_uses_fresh_rng_per_batch(monkeypatch, tmp_path):
     assert len(set(captured_keys)) == len(captured_keys)
 
 
+def test_train_model_fails_fast_on_empty_train_loader(tmp_path):
+    config = {
+        "training": {
+            "base_learning_rate": 0.0001,
+            "start_epoch": 0,
+            "num_epochs_to_train_now": 1,
+            "checkpoint_dir": str(tmp_path),
+            "augmentation": {
+                "max_translation": 2.0,
+                "scale_min_x": 0.8,
+                "scale_max_x": 1.2,
+                "scale_min_y": 0.8,
+                "scale_max_y": 1.2,
+                "max_rotation": 15.0,
+                "elastic_alpha": 0.5,
+                "elastic_sigma": 0.6,
+                "enable_elastic": True,
+                "enable_rotation": True,
+                "enable_scaling": True,
+                "enable_translation": True,
+                "enable_rect_erasing": False,
+                "rect_erase_height": 2,
+                "rect_erase_width": 20,
+            },
+        }
+    }
+
+    with pytest.raises(ValueError, match="train_dataloader did not yield any batches"):
+        mnist_vit.train_model(
+            create_model(),
+            0,
+            nnx.MultiMetric(
+                accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average("loss")
+            ),
+            config,
+            get_empty_dataloader(),
+            get_dummy_dataloaders(4)[1],
+            jax.random.PRNGKey(0),
+        )
+
+
+def test_train_model_fails_fast_on_empty_test_loader(tmp_path):
+    config = {
+        "training": {
+            "base_learning_rate": 0.0001,
+            "start_epoch": 0,
+            "num_epochs_to_train_now": 1,
+            "checkpoint_dir": str(tmp_path),
+            "augmentation": {
+                "max_translation": 2.0,
+                "scale_min_x": 0.8,
+                "scale_max_x": 1.2,
+                "scale_min_y": 0.8,
+                "scale_max_y": 1.2,
+                "max_rotation": 15.0,
+                "elastic_alpha": 0.5,
+                "elastic_sigma": 0.6,
+                "enable_elastic": True,
+                "enable_rotation": True,
+                "enable_scaling": True,
+                "enable_translation": True,
+                "enable_rect_erasing": False,
+                "rect_erase_height": 2,
+                "rect_erase_width": 20,
+            },
+        }
+    }
+
+    with pytest.raises(ValueError, match="test_dataloader did not yield any batches"):
+        mnist_vit.train_model(
+            create_model(),
+            0,
+            nnx.MultiMetric(
+                accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average("loss")
+            ),
+            config,
+            get_dummy_dataloaders(4)[0],
+            get_empty_dataloader(),
+            jax.random.PRNGKey(0),
+        )
+
+
 def test_save_and_load_model():
     model = create_model()
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -463,3 +552,25 @@ def test_resolve_checkpoint_resume(tmp_path):
 
     (tmp_path / f"epoch_7{mnist_vit.CKPT_EXTENSION}").write_bytes(b"epoch7")
     assert mnist_vit.resolve_checkpoint_resume(checkpoint_dir) == (7, 8)
+
+
+def test_visualize_results_skips_prediction_examples_for_empty_test_loader(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("output", exist_ok=True)
+
+    mnist_vit.visualize_results(
+        {
+            "train_loss": [1.0],
+            "test_loss": [1.1],
+            "train_accuracy": [0.5],
+            "test_accuracy": [0.4],
+        },
+        create_model(),
+        get_empty_dataloader(),
+        epoch=2,
+    )
+
+    assert Path("output/results_epoch_2.png").exists()
+    assert not Path("output/prediction_example_epoch_2.png").exists()
