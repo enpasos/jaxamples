@@ -109,3 +109,8 @@ def test_mnist_vit_main_applies_cli_overrides(monkeypatch, tmp_path):
     )
     assert Path(tmp_path / "docs").exists()
     assert Path(tmp_path / "docs" / "mnist_vit_model_config.json").exists()
+    benchmark_memory_path = tmp_path / "output" / "benchmark_memory.jsonl"
+    assert benchmark_memory_path.exists()
+    assert '"model_name":"mnist_vit_model"' in benchmark_memory_path.read_text(
+        encoding="utf-8"
+    )

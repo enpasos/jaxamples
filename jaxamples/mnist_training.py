@@ -265,6 +265,11 @@ class AugmentationParams:
     enable_rect_erasing: bool = field(pytree_node=False)
     rect_erase_height: int = field(pytree_node=False)
     rect_erase_width: int = field(pytree_node=False)
+    translation_probability: float = 1.0
+    scaling_probability: float = 1.0
+    rotation_probability: float = 1.0
+    elastic_probability: float = 1.0
+    rect_erasing_probability: float = 1.0
 
 
 @functools.partial(jax.jit, static_argnames=("augmentation_params",))
@@ -285,68 +290,127 @@ def augment_data_batch(
     radius_val = math.ceil(3.0 * sigma_val)
 
     def augment_single_image(image, key):
-        key1, key2, key3, key4, key5, key6, key7, key8 = random.split(key, 8)
+        (
+            tx_key,
+            ty_key,
+            translate_apply_key,
+            scale_x_key,
+            scale_y_key,
+            scale_apply_key,
+            rotation_angle_key,
+            rotation_apply_key,
+            elastic_apply_key,
+            elastic_key,
+            rect_apply_key,
+            rect_y_key,
+            rect_x_key,
+        ) = random.split(key, 13)
         max_translation = augmentation_params.max_translation
-        tx = random.uniform(key1, minval=-max_translation, maxval=max_translation)
-        ty = random.uniform(key2, minval=-max_translation, maxval=max_translation)
+        tx = random.uniform(tx_key, minval=-max_translation, maxval=max_translation)
+        ty = random.uniform(ty_key, minval=-max_translation, maxval=max_translation)
         translation = jnp.array([ty, tx])
         scale_factor_x = random.uniform(
-            key3,
+            scale_x_key,
             minval=augmentation_params.scale_min_x,
             maxval=augmentation_params.scale_max_x,
         )
         scale_factor_y = random.uniform(
-            key4,
+            scale_y_key,
             minval=augmentation_params.scale_min_y,
             maxval=augmentation_params.scale_max_y,
         )
         scale = jnp.array([scale_factor_y, scale_factor_x])
         max_rotation = augmentation_params.max_rotation * (jnp.pi / 180.0)
-        rotation_angle = random.uniform(key5, minval=-max_rotation, maxval=max_rotation)
+        rotation_angle = random.uniform(
+            rotation_angle_key, minval=-max_rotation, maxval=max_rotation
+        )
 
-        if augmentation_params.enable_elastic:
-            image = elastic_deform(
-                image, alpha_val, sigma_val, key6, x_grid, y_grid, radius_val
-            )
+        apply_elastic = jnp.logical_and(
+            jnp.asarray(augmentation_params.enable_elastic),
+            random.uniform(elastic_apply_key) < augmentation_params.elastic_probability,
+        )
+        image = jax.lax.cond(
+            apply_elastic,
+            lambda img: elastic_deform(
+                img, alpha_val, sigma_val, elastic_key, x_grid, y_grid, radius_val
+            ),
+            lambda img: img,
+            image,
+        )
 
-        if augmentation_params.enable_rotation:
-            image = rotate_image(image, jnp.rad2deg(rotation_angle))
+        apply_rotation = jnp.logical_and(
+            jnp.asarray(augmentation_params.enable_rotation),
+            random.uniform(rotation_apply_key) < augmentation_params.rotation_probability,
+        )
+        image = jax.lax.cond(
+            apply_rotation,
+            lambda img: rotate_image(img, jnp.rad2deg(rotation_angle)),
+            lambda img: img,
+            image,
+        )
 
-        if augmentation_params.enable_scaling or augmentation_params.enable_translation:
-            image = scale_and_translate(
-                image=image,
+        apply_scaling = jnp.logical_and(
+            jnp.asarray(augmentation_params.enable_scaling),
+            random.uniform(scale_apply_key) < augmentation_params.scaling_probability,
+        )
+        apply_translation = jnp.logical_and(
+            jnp.asarray(augmentation_params.enable_translation),
+            random.uniform(translate_apply_key) < augmentation_params.translation_probability,
+        )
+        effective_scale = jnp.where(
+            apply_scaling,
+            scale,
+            jnp.ones((2,), dtype=scale.dtype),
+        )
+        effective_translation = jnp.where(
+            apply_translation,
+            translation,
+            jnp.zeros((2,), dtype=translation.dtype),
+        )
+        image = jax.lax.cond(
+            jnp.logical_or(apply_scaling, apply_translation),
+            lambda img: scale_and_translate(
+                image=img,
                 shape=(height, width, channels),
                 spatial_dims=(0, 1),
-                scale=(
-                    scale
-                    if augmentation_params.enable_scaling
-                    else jnp.array([1.0, 1.0])
-                ),
-                translation=(
-                    translation
-                    if augmentation_params.enable_translation
-                    else jnp.array([0.0, 0.0])
-                ),
+                scale=effective_scale,
+                translation=effective_translation,
                 method="linear",
                 antialias=True,
-            )
+            ),
+            lambda img: img,
+            image,
+        )
 
-        if getattr(augmentation_params, "enable_rect_erasing", False):
-            erase_h = getattr(augmentation_params, "rect_erase_height", 6)
-            erase_w = getattr(augmentation_params, "rect_erase_width", 6)
+        apply_rect_erasing = jnp.logical_and(
+            jnp.asarray(getattr(augmentation_params, "enable_rect_erasing", False)),
+            random.uniform(rect_apply_key)
+            < getattr(augmentation_params, "rect_erasing_probability", 1.0),
+        )
+        erase_h = getattr(augmentation_params, "rect_erase_height", 6)
+        erase_w = getattr(augmentation_params, "rect_erase_width", 6)
+
+        def _apply_rect_erasing(img: jnp.ndarray) -> jnp.ndarray:
             max_y = height - erase_h
             max_x = width - erase_w
             y0 = jax.lax.floor(
-                random.uniform(key7, (), minval=0, maxval=max_y + 1)
+                random.uniform(rect_y_key, (), minval=0, maxval=max_y + 1)
             ).astype(jnp.int32)
             x0 = jax.lax.floor(
-                random.uniform(key8, (), minval=0, maxval=max_x + 1)
+                random.uniform(rect_x_key, (), minval=0, maxval=max_x + 1)
             ).astype(jnp.int32)
-            mask = jnp.ones_like(image)
+            mask = jnp.ones_like(img)
             erase_shape = (erase_h, erase_w, channels)
-            zero_patch = jnp.zeros(erase_shape, dtype=image.dtype)
+            zero_patch = jnp.zeros(erase_shape, dtype=img.dtype)
             mask = jax.lax.dynamic_update_slice(mask, zero_patch, (y0, x0, 0))
-            image = image * mask
+            return img * mask
+
+        image = jax.lax.cond(
+            apply_rect_erasing,
+            _apply_rect_erasing,
+            lambda img: img,
+            image,
+        )
         return image
 
     rng_keys = random.split(rng_key, num=batch_size)

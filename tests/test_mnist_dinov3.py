@@ -257,6 +257,11 @@ def test_mnist_dinov3_main_reuses_shared_pipeline(monkeypatch, tmp_path):
     )
     assert Path(tmp_path / "docs").exists()
     assert Path(tmp_path / "docs" / "mnist_dinov3_model_config.json").exists()
+    benchmark_memory_path = tmp_path / "output" / "benchmark_memory.jsonl"
+    assert benchmark_memory_path.exists()
+    assert '"model_name":"mnist_dinov3_model"' in benchmark_memory_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_mnist_dinov3_run_onnx_uses_dino_default_path(monkeypatch):

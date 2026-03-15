@@ -6,6 +6,7 @@ import onnx
 from flax import nnx
 from torch.utils.data import DataLoader
 
+from jaxamples.mnist_benchmark_memory import append_benchmark_record
 from jaxamples.mnist_config import MnistExampleConfig
 
 
@@ -108,6 +109,8 @@ def run_mnist_example(
             start_epoch + config.training.num_epochs_to_train_now - 1,
             output_dir=str(config.artifact_dir()),
         )
+        benchmark_memory_path = append_benchmark_record(config, metrics_history)
+        print(f"Benchmark memory updated at {benchmark_memory_path}")
 
     input_shapes = config.onnx.input_shapes
     input_params = config.onnx.input_params

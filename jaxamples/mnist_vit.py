@@ -10,11 +10,10 @@ from jax2onnx.plugins.examples.nnx.vit import VisionTransformer
 
 from jaxamples import mnist_training as mnist_training_lib
 from jaxamples.mnist_config import (
-    AugmentationConfig,
     MnistExampleConfig,
     MnistVitModelConfig,
     OnnxConfig,
-    TrainingConfig,
+    shared_mnist_training_config,
 )
 from jaxamples.mnist_example_cli import apply_common_overrides, parse_example_args
 from jaxamples.mnist_example_runner import run_mnist_example
@@ -118,32 +117,9 @@ def get_default_config() -> MnistExampleConfig:
     default_output_dir = os.path.abspath("./output/")
     return MnistExampleConfig(
         seed=5678,
-        training=TrainingConfig(
-            enable_training=True,
-            batch_size=64,
-            base_learning_rate=0.0001,
-            num_epochs_to_train_now=500,
-            warmup_epochs=5,
+        training=shared_mnist_training_config(
             checkpoint_dir=os.path.abspath("./data/checkpoints/"),
-            data_dir="./data",
             output_dir=default_output_dir,
-            augmentation=AugmentationConfig(
-                enable_translation=True,
-                max_translation=3.0,
-                enable_scaling=True,
-                scale_min_x=0.85,
-                scale_max_x=1.15,
-                scale_min_y=0.85,
-                scale_max_y=1.15,
-                enable_rotation=True,
-                max_rotation=15.0,
-                enable_elastic=True,
-                elastic_alpha=1.0,
-                elastic_sigma=0.5,
-                enable_rect_erasing=False,
-                rect_erase_height=2,
-                rect_erase_width=20,
-            ),
         ),
         model=MnistVitModelConfig(
             height=28,

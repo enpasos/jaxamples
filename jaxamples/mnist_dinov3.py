@@ -14,11 +14,10 @@ from jax2onnx.plugins.examples.nnx.dinov3 import (
 )
 
 from jaxamples.mnist_config import (
-    AugmentationConfig,
     MnistDinoV3ModelConfig,
     MnistExampleConfig,
     OnnxConfig,
-    TrainingConfig,
+    shared_mnist_training_config,
 )
 from jaxamples.mnist_example_cli import apply_common_overrides, parse_example_args
 from jaxamples.mnist_example_runner import run_mnist_example
@@ -179,33 +178,9 @@ def get_default_config() -> MnistExampleConfig:
     )
     return MnistExampleConfig(
         seed=5678,
-        training=TrainingConfig(
-            enable_training=True,
-            batch_size=64,
-            base_learning_rate=0.0001,
-            num_epochs_to_train_now=500,
-            warmup_epochs=5,
+        training=shared_mnist_training_config(
             checkpoint_dir=os.path.abspath(os.path.join("./data", checkpoint_name)),
-            data_dir="./data",
             output_dir=default_output_dir,
-            weight_decay=1e-4,
-            augmentation=AugmentationConfig(
-                enable_translation=True,
-                max_translation=3.0,
-                enable_scaling=True,
-                scale_min_x=0.85,
-                scale_max_x=1.15,
-                scale_min_y=0.85,
-                scale_max_y=1.15,
-                enable_rotation=True,
-                max_rotation=15.0,
-                enable_elastic=True,
-                elastic_alpha=1.0,
-                elastic_sigma=0.5,
-                enable_rect_erasing=False,
-                rect_erase_height=2,
-                rect_erase_width=20,
-            ),
         ),
         # Match the ViT example more closely on token count and parameter budget.
         model=model_config,

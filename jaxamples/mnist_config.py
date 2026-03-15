@@ -30,6 +30,10 @@ def _validate_dropout(rate: float, name: str) -> None:
     _require(0.0 <= rate < 1.0, f"{name} must be in [0.0, 1.0).")
 
 
+def _validate_probability(rate: float, name: str) -> None:
+    _require(0.0 <= rate <= 1.0, f"{name} must be in [0.0, 1.0].")
+
+
 @dataclass
 class AugmentationConfig(ConfigMixin):
     enable_translation: bool
@@ -47,20 +51,30 @@ class AugmentationConfig(ConfigMixin):
     enable_rect_erasing: bool
     rect_erase_height: int
     rect_erase_width: int
+    translation_probability: float = 1.0
+    scaling_probability: float = 1.0
+    rotation_probability: float = 1.0
+    elastic_probability: float = 1.0
+    rect_erasing_probability: float = 1.0
 
     def validate(self) -> None:
         _require(self.max_translation >= 0.0, "max_translation must be >= 0.")
+        _validate_probability(self.translation_probability, "translation_probability")
         _require(self.scale_min_x > 0.0, "scale_min_x must be > 0.")
         _require(self.scale_max_x > 0.0, "scale_max_x must be > 0.")
         _require(self.scale_min_y > 0.0, "scale_min_y must be > 0.")
         _require(self.scale_max_y > 0.0, "scale_max_y must be > 0.")
         _require(self.scale_min_x <= self.scale_max_x, "scale_min_x must be <= scale_max_x.")
         _require(self.scale_min_y <= self.scale_max_y, "scale_min_y must be <= scale_max_y.")
+        _validate_probability(self.scaling_probability, "scaling_probability")
         _require(self.max_rotation >= 0.0, "max_rotation must be >= 0.")
+        _validate_probability(self.rotation_probability, "rotation_probability")
         _require(self.elastic_alpha >= 0.0, "elastic_alpha must be >= 0.")
         _require(self.elastic_sigma > 0.0, "elastic_sigma must be > 0.")
+        _validate_probability(self.elastic_probability, "elastic_probability")
         _require(self.rect_erase_height > 0, "rect_erase_height must be > 0.")
         _require(self.rect_erase_width > 0, "rect_erase_width must be > 0.")
+        _validate_probability(self.rect_erasing_probability, "rect_erasing_probability")
 
 
 @dataclass
@@ -153,6 +167,33 @@ class MnistVitModelConfig(ConfigMixin):
 
 
 @dataclass
+class MnistCnnModelConfig(ConfigMixin):
+    height: int
+    width: int
+    num_classes: int
+    conv_channels: list[int]
+    dense_hidden_dim: int
+    feature_dropout_rate: float = 0.1
+    classifier_dropout_rate: float = 0.3
+
+    def validate(self) -> None:
+        _require(self.height > 0, "height must be > 0.")
+        _require(self.width > 0, "width must be > 0.")
+        _require(self.num_classes >= 2, "num_classes must be >= 2.")
+        _require(
+            len(self.conv_channels) == 4,
+            "conv_channels must contain exactly four entries.",
+        )
+        _require(
+            all(channel > 0 for channel in self.conv_channels),
+            "conv_channels must all be > 0.",
+        )
+        _require(self.dense_hidden_dim > 0, "dense_hidden_dim must be > 0.")
+        _validate_dropout(self.feature_dropout_rate, "feature_dropout_rate")
+        _validate_dropout(self.classifier_dropout_rate, "classifier_dropout_rate")
+
+
+@dataclass
 class MnistDinoV3ModelConfig(ConfigMixin):
     img_size: int
     patch_size: int
@@ -212,6 +253,11 @@ class MnistExampleConfig(ConfigMixin):
                 first_input_shape[1:3] == (self.model.height, self.model.width),
                 "ONNX input shape must match the ViT image size.",
             )
+        if isinstance(self.model, MnistCnnModelConfig):
+            _require(
+                first_input_shape[1:3] == (self.model.height, self.model.width),
+                "ONNX input shape must match the CNN image size.",
+            )
         if isinstance(self.model, MnistDinoV3ModelConfig):
             _require(
                 first_input_shape[1:3] == (self.model.img_size, self.model.img_size),
@@ -232,3 +278,57 @@ class MnistExampleConfig(ConfigMixin):
     def config_output_path(self) -> Path:
         onnx_path = Path(self.onnx.output_path)
         return onnx_path.with_name(f"{onnx_path.stem}_config.json")
+
+    def benchmark_memory_path(self) -> Path:
+        return self.artifact_dir() / "benchmark_memory.jsonl"
+
+
+def shared_mnist_augmentation_config() -> AugmentationConfig:
+    return AugmentationConfig(
+        enable_translation=True,
+        max_translation=2.5,
+        translation_probability=0.8,
+        enable_scaling=True,
+        scale_min_x=0.9,
+        scale_max_x=1.1,
+        scale_min_y=0.9,
+        scale_max_y=1.1,
+        scaling_probability=0.7,
+        enable_rotation=True,
+        max_rotation=10.0,
+        rotation_probability=0.7,
+        enable_elastic=True,
+        elastic_alpha=1.2,
+        elastic_sigma=0.7,
+        elastic_probability=0.35,
+        enable_rect_erasing=False,
+        rect_erase_height=2,
+        rect_erase_width=20,
+        rect_erasing_probability=0.0,
+    )
+
+
+def shared_mnist_training_config(
+    *,
+    checkpoint_dir: str,
+    output_dir: str,
+    data_dir: str = "./data",
+    enable_training: bool = True,
+    batch_size: int = 64,
+    base_learning_rate: float = 1e-4,
+    num_epochs_to_train_now: int = 500,
+    warmup_epochs: int = 5,
+    weight_decay: float = 1e-4,
+) -> TrainingConfig:
+    return TrainingConfig(
+        enable_training=enable_training,
+        batch_size=batch_size,
+        base_learning_rate=base_learning_rate,
+        num_epochs_to_train_now=num_epochs_to_train_now,
+        warmup_epochs=warmup_epochs,
+        checkpoint_dir=checkpoint_dir,
+        data_dir=data_dir,
+        output_dir=output_dir,
+        weight_decay=weight_decay,
+        augmentation=shared_mnist_augmentation_config(),
+    )
