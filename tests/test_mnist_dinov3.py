@@ -278,4 +278,4 @@ def test_mnist_dinov3_run_onnx_uses_dino_default_path(monkeypatch):
 
     assert captured["args"] is None
     assert captured["description"] == "Test ONNX MNIST DINOv3 model"
-    assert captured["default_onnx_model"] == "output/mnist_dinov3_model.onnx"
+    assert captured["default_onnx_model"] == "onnx/mnist_dinov3_model.onnx"

@@ -5,7 +5,7 @@ def main(args=None):
     run_mnist_onnx_main(
         args=args,
         description="Test ONNX MNIST CNN model",
-        default_onnx_model="output/mnist_cnn_model.onnx",
+        default_onnx_model="onnx/mnist_cnn_model.onnx",
     )
 
 

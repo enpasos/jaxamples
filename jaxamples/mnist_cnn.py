@@ -141,6 +141,7 @@ class MnistCnnClassifier(nnx.Module):
 
 def get_default_config() -> MnistExampleConfig:
     default_output_dir = os.path.abspath("./output/")
+    default_onnx_dir = os.path.abspath("./onnx/")
     model_config = MnistCnnModelConfig(
         height=28,
         width=28,
@@ -160,7 +161,7 @@ def get_default_config() -> MnistExampleConfig:
         model=model_config,
         onnx=OnnxConfig(
             model_name="mnist_cnn_model",
-            output_path=os.path.join(default_output_dir, "mnist_cnn_model.onnx"),
+            output_path=os.path.join(default_onnx_dir, "mnist_cnn_model.onnx"),
             input_shapes=[("B", 28, 28, 1)],
             input_params={"deterministic": True},
         ),
@@ -175,7 +176,7 @@ def main(args=None) -> None:
     cli_args = parse_example_args(
         args,
         description="Train and export the MNIST CNN baseline",
-        default_onnx_output="output/mnist_cnn_model.onnx",
+        default_onnx_output="onnx/mnist_cnn_model.onnx",
     )
     config = apply_common_overrides(get_default_config(), cli_args)
     run_mnist_example(

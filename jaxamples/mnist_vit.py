@@ -115,6 +115,7 @@ def visualize_results(
 
 def get_default_config() -> MnistExampleConfig:
     default_output_dir = os.path.abspath("./output/")
+    default_onnx_dir = os.path.abspath("./onnx/")
     return MnistExampleConfig(
         seed=5678,
         training=shared_mnist_training_config(
@@ -139,7 +140,7 @@ def get_default_config() -> MnistExampleConfig:
         ),
         onnx=OnnxConfig(
             model_name="mnist_vit_model",
-            output_path=os.path.join(default_output_dir, "mnist_vit_model.onnx"),
+            output_path=os.path.join(default_onnx_dir, "mnist_vit_model.onnx"),
             input_shapes=[("B", 28, 28, 1)],
             input_params={"deterministic": True},
         ),
@@ -154,7 +155,7 @@ def main(args=None) -> None:
     cli_args = parse_example_args(
         args,
         description="Train and export the MNIST ViT example",
-        default_onnx_output="output/mnist_vit_model.onnx",
+        default_onnx_output="onnx/mnist_vit_model.onnx",
     )
     config = apply_common_overrides(get_default_config(), cli_args)
 

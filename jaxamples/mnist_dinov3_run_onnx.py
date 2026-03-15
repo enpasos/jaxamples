@@ -5,7 +5,7 @@ def main(args=None):
     return run_mnist_onnx_main(
         args=args,
         description="Test ONNX MNIST DINOv3 model",
-        default_onnx_model="output/mnist_dinov3_model.onnx",
+        default_onnx_model="onnx/mnist_dinov3_model.onnx",
     )
 
 

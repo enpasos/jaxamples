@@ -32,11 +32,11 @@ poetry run python jaxamples/mnist_dinov3.py --skip-training --checkpoint-dir ./d
 poetry run python jaxamples/mnist_vit.py --output-dir ./runs/mnist-vit
 ```
 
-Plots and metrics go to `output/` by default. You can force a dedicated run directory with `--output-dir`; unless `--onnx-output` is set explicitly, the ONNX model and resolved config are written there too.
+Plots and metrics go to `output/` by default. Exported ONNX models and their resolved configs go to `onnx/` by default. You can still override the export path explicitly with `--onnx-output`.
 
-By default, local runs now write their generated artifacts to `output/`.
+By default, local runs write training artifacts to `output/` and ONNX exports to `onnx/`.
 
-Each training/export run also writes the resolved config next to the ONNX model, for example `output/mnist_vit_model_config.json`.
+Each training/export run also writes the resolved config next to the ONNX model, for example `onnx/mnist_vit_model_config.json`.
 
 Every completed training run also appends a compact summary to `output/benchmark_memory.jsonl`, including the model name, augmentation fingerprint, best/final train and test accuracies, and pointers to the config and metrics artifacts. That makes it easier to compare `mnist_dinov3`, `mnist_vit`, `mnist_cnn`, and `mnist_strong_cnn` under identical default training conditions.
 

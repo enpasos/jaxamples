@@ -47,7 +47,7 @@ def parse_example_args(
         "--output-dir",
         type=str,
         default=None,
-        help="Directory for plots, metrics, and by default the ONNX export.",
+        help="Directory for plots and metrics.",
     )
     parser.add_argument(
         "--seed",
@@ -85,12 +85,7 @@ def apply_common_overrides(
     if config.training.output_dir is not None:
         config.training.output_dir = os.path.abspath(config.training.output_dir)
 
-    default_onnx_output = getattr(args, "default_onnx_output", args.onnx_output)
-    onnx_output_path = args.onnx_output
-    if config.training.output_dir is not None and args.onnx_output == default_onnx_output:
-        default_model_name = Path(default_onnx_output).name
-        onnx_output_path = str(Path(config.training.output_dir) / default_model_name)
-    config.onnx.output_path = onnx_output_path
+    config.onnx.output_path = os.path.abspath(args.onnx_output)
 
     if args.skip_training:
         config.training.enable_training = False

@@ -130,7 +130,7 @@ def test_apply_common_overrides_updates_config_paths_and_flags(tmp_path):
     assert updated.training.enable_training is False
 
 
-def test_apply_common_overrides_redirects_default_onnx_output_into_output_dir(tmp_path):
+def test_apply_common_overrides_keeps_default_onnx_output_separate_from_output_dir(tmp_path):
     config = MnistExampleConfig(
         seed=1,
         training=TrainingConfig(
@@ -194,8 +194,8 @@ def test_apply_common_overrides_redirects_default_onnx_output_into_output_dir(tm
     updated = apply_common_overrides(config, args)
 
     assert updated.training.output_dir == os.path.abspath(str(tmp_path / "artifacts"))
-    assert updated.onnx.output_path == str(tmp_path / "artifacts" / "default.onnx")
-    assert updated.config_output_path() == tmp_path / "artifacts" / "default_config.json"
+    assert updated.onnx.output_path == os.path.abspath("output/default.onnx")
+    assert updated.config_output_path() == Path(os.path.abspath("output/default_config.json"))
 
 
 def test_apply_common_overrides_rejects_invalid_batch_size():

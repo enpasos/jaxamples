@@ -187,4 +187,4 @@ def test_mnist_cnn_run_onnx_uses_cnn_default_path(monkeypatch):
 
     assert captured["args"] is None
     assert captured["description"] == "Test ONNX MNIST CNN model"
-    assert captured["default_onnx_model"] == "output/mnist_cnn_model.onnx"
+    assert captured["default_onnx_model"] == "onnx/mnist_cnn_model.onnx"

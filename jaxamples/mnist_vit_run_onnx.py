@@ -8,7 +8,7 @@ def main(
     args=None,
     *,
     description: str = "Test ONNX MNIST model",
-    default_onnx_model: str = "output/mnist_vit_model.onnx",
+    default_onnx_model: str = "onnx/mnist_vit_model.onnx",
 ):
     import argparse
     from torchvision import datasets
