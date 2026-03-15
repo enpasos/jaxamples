@@ -102,10 +102,64 @@ def test_mnist_dinov3_default_config_uses_fairer_budget():
     config = mnist_dinov3.get_default_config()
 
     assert config.training.num_epochs_to_train_now == 500
+    assert config.training.weight_decay == pytest.approx(1e-4)
+    assert config.training.checkpoint_dir.endswith(
+        "dinov3_p4_dim192_d4_h6_cls_mean_checkpoints"
+    )
     assert config.model.patch_size == 4
     assert config.model.embed_dim == 192
     assert config.model.depth == 4
     assert config.model.num_heads == 6
+    assert config.model.head_hidden_dim == 192
+    assert config.model.head_dropout_rate == pytest.approx(0.1)
+    assert config.model.pool_features == "cls_mean"
+
+
+def test_lr_schedule_applies_warmup_before_cosine_decay():
+    config = mnist_dinov3.get_default_config()
+    config.training.start_epoch = 0
+    config.training.num_epochs_to_train_now = 20
+    config.training.base_learning_rate = 1e-4
+    config.training.warmup_epochs = 5
+
+    lrs = [float(mnist_training.lr_schedule(epoch, config)) for epoch in range(7)]
+
+    assert lrs[0] == pytest.approx(2e-5)
+    assert lrs[4] == pytest.approx(1e-4)
+    assert lrs[5] == pytest.approx(1e-4)
+    assert lrs[6] < lrs[5]
+
+
+def test_lr_schedule_does_not_restart_warmup_on_resume():
+    config = mnist_dinov3.get_default_config()
+    config.training.start_epoch = 20
+    config.training.num_epochs_to_train_now = 10
+    config.training.base_learning_rate = 1e-4
+    config.training.warmup_epochs = 5
+
+    resumed_lr = float(mnist_training.lr_schedule(20, config))
+
+    assert resumed_lr < 1e-4
+
+
+def test_load_model_reports_incompatible_checkpoint(tmp_path):
+    old_model = mnist_dinov3.MnistDinoV3Classifier(
+        img_size=28,
+        patch_size=7,
+        embed_dim=96,
+        depth=2,
+        num_heads=3,
+        num_classes=10,
+        rngs=nnx.Rngs(0),
+    )
+    mnist_training.save_model(old_model, str(tmp_path), epoch=0)
+
+    new_model = mnist_dinov3.create_model(mnist_dinov3.get_default_config().model, seed=0)
+
+    with pytest.raises(
+        mnist_training.IncompatibleCheckpointError, match="incompatible with the current model"
+    ):
+        mnist_training.load_model(new_model, str(tmp_path), epoch=0, seed=0)
 
 
 def test_mnist_dinov3_main_reuses_shared_pipeline(monkeypatch, tmp_path):

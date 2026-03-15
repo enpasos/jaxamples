@@ -75,6 +75,7 @@ class TrainingConfig(ConfigMixin):
     augmentation: AugmentationConfig
     start_epoch: int = 0
     output_dir: str | None = "output"
+    weight_decay: float = 1e-4
 
     def validate(self) -> None:
         _require(self.batch_size > 0, "batch_size must be > 0.")
@@ -85,6 +86,7 @@ class TrainingConfig(ConfigMixin):
         )
         _require(self.warmup_epochs >= 0, "warmup_epochs must be >= 0.")
         _require(self.start_epoch >= 0, "start_epoch must be >= 0.")
+        _require(self.weight_decay >= 0.0, "weight_decay must be >= 0.")
         _require(bool(self.checkpoint_dir), "checkpoint_dir must not be empty.")
         _require(bool(self.data_dir), "data_dir must not be empty.")
         if self.output_dir is not None:
@@ -159,6 +161,9 @@ class MnistDinoV3ModelConfig(ConfigMixin):
     num_heads: int
     num_classes: int
     num_storage_tokens: int = 0
+    head_hidden_dim: int = 192
+    head_dropout_rate: float = 0.1
+    pool_features: str = "cls_mean"
 
     def validate(self) -> None:
         _require(self.img_size > 0, "img_size must be > 0.")
@@ -176,6 +181,12 @@ class MnistDinoV3ModelConfig(ConfigMixin):
         )
         _require(self.num_classes >= 2, "num_classes must be >= 2.")
         _require(self.num_storage_tokens >= 0, "num_storage_tokens must be >= 0.")
+        _require(self.head_hidden_dim > 0, "head_hidden_dim must be > 0.")
+        _validate_dropout(self.head_dropout_rate, "head_dropout_rate")
+        _require(
+            self.pool_features in {"cls", "cls_mean"},
+            "pool_features must be 'cls' or 'cls_mean'.",
+        )
 
 
 @dataclass

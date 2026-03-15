@@ -70,12 +70,19 @@ class MnistDinoV3Classifier(nnx.Module):
         num_heads: int,
         num_classes: int,
         num_storage_tokens: int = 0,
+        head_hidden_dim: int = 192,
+        head_dropout_rate: float = 0.1,
+        pool_features: str = "cls_mean",
         rngs: nnx.Rngs,
     ):
         params_key = rngs.params()
         backbone_key, head_key = jax.random.split(params_key)
+        head_norm_key, head_hidden_key, head_dropout_key, head_out_key = jax.random.split(
+            head_key, 4
+        )
 
         self.img_size = int(img_size)
+        self.pool_features = pool_features
         self.backbone = DinoVisionTransformer(
             img_size=img_size,
             patch_size=patch_size,
@@ -98,7 +105,15 @@ class MnistDinoV3Classifier(nnx.Module):
             cos=np.asarray(cos),
             prefix_tokens=1 + num_storage_tokens,
         )
-        self.head = nnx.Linear(embed_dim, num_classes, rngs=nnx.Rngs(head_key))
+        head_input_dim = embed_dim if pool_features == "cls" else embed_dim * 2
+        self.head_norm = nnx.LayerNorm(head_input_dim, rngs=nnx.Rngs(head_norm_key))
+        self.head_hidden = nnx.Linear(
+            head_input_dim, head_hidden_dim, rngs=nnx.Rngs(head_hidden_key)
+        )
+        self.head_dropout = nnx.Dropout(rate=head_dropout_rate, rngs=nnx.Rngs(head_dropout_key))
+        self.head_out = nnx.Linear(
+            head_hidden_dim, num_classes, rngs=nnx.Rngs(head_out_key)
+        )
 
     def _encode_backbone(self, images: jax.Array) -> jax.Array:
         tokens = self.backbone.patch_embed(images)
@@ -118,18 +133,50 @@ class MnistDinoV3Classifier(nnx.Module):
             tokens = block(tokens, process_heads=self.process_heads)
         return self.backbone.norm(tokens)
 
+    def _pool_head_features(self, tokens: jax.Array) -> jax.Array:
+        cls_token = tokens[:, 0, :]
+        if self.pool_features == "cls":
+            return cls_token
+
+        patch_tokens = tokens[:, 1 + self.backbone.num_storage_tokens :, :]
+        mean_pooled = jnp.mean(patch_tokens, axis=1)
+        return jnp.concatenate([cls_token, mean_pooled], axis=-1)
+
     def __call__(
         self, images: jax.Array, *, deterministic: bool = True
     ) -> jax.Array:
-        del deterministic
         backbone_inputs = prepare_dinov3_inputs(images, expected_size=self.img_size)
         tokens = self._encode_backbone(backbone_inputs)
-        cls_token = tokens[:, 0, :]
-        return self.head(cls_token)
+        head_features = self._pool_head_features(tokens)
+        head_features = self.head_norm(head_features)
+        head_features = self.head_hidden(head_features)
+        head_features = nnx.gelu(head_features, approximate=False)
+        head_features = self.head_dropout(head_features, deterministic=deterministic)
+        return self.head_out(head_features)
 
 
 def get_default_config() -> MnistExampleConfig:
     default_output_dir = os.path.abspath("./output/")
+    model_config = MnistDinoV3ModelConfig(
+        img_size=28,
+        patch_size=4,
+        embed_dim=192,
+        depth=4,
+        num_heads=6,
+        num_classes=10,
+        num_storage_tokens=0,
+        head_hidden_dim=192,
+        head_dropout_rate=0.1,
+        pool_features="cls_mean",
+    )
+    checkpoint_name = (
+        "dinov3_"
+        f"p{model_config.patch_size}_"
+        f"dim{model_config.embed_dim}_"
+        f"d{model_config.depth}_"
+        f"h{model_config.num_heads}_"
+        f"{model_config.pool_features}_checkpoints"
+    )
     return MnistExampleConfig(
         seed=5678,
         training=TrainingConfig(
@@ -138,9 +185,10 @@ def get_default_config() -> MnistExampleConfig:
             base_learning_rate=0.0001,
             num_epochs_to_train_now=500,
             warmup_epochs=5,
-            checkpoint_dir=os.path.abspath("./data/dinov3_checkpoints/"),
+            checkpoint_dir=os.path.abspath(os.path.join("./data", checkpoint_name)),
             data_dir="./data",
             output_dir=default_output_dir,
+            weight_decay=1e-4,
             augmentation=AugmentationConfig(
                 enable_translation=True,
                 max_translation=3.0,
@@ -160,15 +208,7 @@ def get_default_config() -> MnistExampleConfig:
             ),
         ),
         # Match the ViT example more closely on token count and parameter budget.
-        model=MnistDinoV3ModelConfig(
-            img_size=28,
-            patch_size=4,
-            embed_dim=192,
-            depth=4,
-            num_heads=6,
-            num_classes=10,
-            num_storage_tokens=0,
-        ),
+        model=model_config,
         onnx=OnnxConfig(
             model_name="mnist_dinov3_model",
             output_path=os.path.join(default_output_dir, "mnist_dinov3_model.onnx"),

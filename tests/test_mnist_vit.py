@@ -432,6 +432,161 @@ def test_train_model_uses_fresh_rng_per_batch(monkeypatch, tmp_path):
     assert len(set(captured_keys)) == len(captured_keys)
 
 
+def test_train_model_uses_constant_weight_decay_from_config(monkeypatch, tmp_path):
+    captured_weight_decays = []
+
+    class FakeMetrics:
+        def reset(self):
+            pass
+
+        def compute(self):
+            return {"loss": jnp.array(0.0), "accuracy": jnp.array(0.0)}
+
+    def fake_train_step(_model, _optimizer, _metrics, _batch, _learning_rate, weight_decay):
+        captured_weight_decays.append(float(weight_decay))
+
+    monkeypatch.setattr(mnist_vit, "augment_data_batch", lambda batch, *_args: batch)
+    monkeypatch.setattr(mnist_vit, "train_step", fake_train_step)
+    monkeypatch.setattr(mnist_vit, "eval_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "visualize_augmented_images", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mnist_vit, "visualize_incorrect_classifications", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(mnist_vit, "save_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "save_test_accuracy_metrics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mnist_vit, "load_and_plot_test_accuracy_metrics", lambda *args, **kwargs: None
+    )
+
+    train_dataloader, test_dataloader = get_dummy_dataloaders(batch_size=4)
+    config = {
+        "training": {
+            "base_learning_rate": 0.0001,
+            "weight_decay": 3e-4,
+            "start_epoch": 0,
+            "warmup_epochs": 0,
+            "num_epochs_to_train_now": 2,
+            "checkpoint_dir": str(tmp_path),
+            "augmentation": {
+                "max_translation": 2.0,
+                "scale_min_x": 0.8,
+                "scale_max_x": 1.2,
+                "scale_min_y": 0.8,
+                "scale_max_y": 1.2,
+                "max_rotation": 15.0,
+                "elastic_alpha": 0.5,
+                "elastic_sigma": 0.6,
+                "enable_elastic": True,
+                "enable_rotation": True,
+                "enable_scaling": True,
+                "enable_translation": True,
+                "enable_rect_erasing": False,
+                "rect_erase_height": 2,
+                "rect_erase_width": 20,
+            },
+        }
+    }
+
+    mnist_vit.train_model(
+        create_model(),
+        0,
+        FakeMetrics(),
+        config,
+        train_dataloader,
+        test_dataloader,
+        jax.random.PRNGKey(0),
+    )
+
+    assert captured_weight_decays
+    assert captured_weight_decays == [pytest.approx(3e-4)] * len(captured_weight_decays)
+
+
+def test_train_model_reports_clean_train_accuracy_separately(monkeypatch, tmp_path):
+    class FakeMetrics:
+        def __init__(self):
+            self.current = {"loss": jnp.array(0.0), "accuracy": jnp.array(0.0)}
+
+        def reset(self):
+            self.current = {"loss": jnp.array(0.0), "accuracy": jnp.array(0.0)}
+
+        def compute(self):
+            return self.current
+
+    train_images = torch.zeros(4, 1, 28, 28, dtype=torch.float32)
+    train_labels = torch.zeros(4, dtype=torch.int64)
+    test_images = torch.ones(4, 1, 28, 28, dtype=torch.float32)
+    test_labels = torch.ones(4, dtype=torch.int64)
+    train_dataloader = DataLoader(
+        TensorDataset(train_images, train_labels), batch_size=2, shuffle=False
+    )
+    test_dataloader = DataLoader(
+        TensorDataset(test_images, test_labels), batch_size=2, shuffle=False
+    )
+
+    def fake_train_step(_model, _optimizer, metrics, _batch, _learning_rate, _weight_decay):
+        metrics.current = {"loss": jnp.array(1.23), "accuracy": jnp.array(0.25)}
+
+    def fake_eval_step(_model, metrics, batch):
+        first_label = int(batch["label"][0])
+        accuracy = 0.75 if first_label == 0 else 0.5
+        metrics.current = {"loss": jnp.array(0.0), "accuracy": jnp.array(accuracy)}
+
+    monkeypatch.setattr(mnist_vit, "augment_data_batch", lambda batch, *_args: batch)
+    monkeypatch.setattr(mnist_vit, "train_step", fake_train_step)
+    monkeypatch.setattr(mnist_vit, "eval_step", fake_eval_step)
+    monkeypatch.setattr(mnist_vit, "visualize_augmented_images", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mnist_vit, "visualize_incorrect_classifications", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(mnist_vit, "save_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mnist_vit, "save_test_accuracy_metrics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mnist_vit, "load_and_plot_test_accuracy_metrics", lambda *args, **kwargs: None
+    )
+
+    config = {
+        "training": {
+            "base_learning_rate": 0.0001,
+            "weight_decay": 1e-4,
+            "start_epoch": 0,
+            "warmup_epochs": 0,
+            "num_epochs_to_train_now": 1,
+            "checkpoint_dir": str(tmp_path),
+            "augmentation": {
+                "max_translation": 0.0,
+                "scale_min_x": 1.0,
+                "scale_max_x": 1.0,
+                "scale_min_y": 1.0,
+                "scale_max_y": 1.0,
+                "max_rotation": 0.0,
+                "elastic_alpha": 0.0,
+                "elastic_sigma": 1.0,
+                "enable_elastic": False,
+                "enable_rotation": False,
+                "enable_scaling": False,
+                "enable_translation": False,
+                "enable_rect_erasing": False,
+                "rect_erase_height": 2,
+                "rect_erase_width": 20,
+            },
+        }
+    }
+
+    metrics_history = mnist_vit.train_model(
+        create_model(),
+        0,
+        FakeMetrics(),
+        config,
+        train_dataloader,
+        test_dataloader,
+        jax.random.PRNGKey(0),
+    )
+
+    assert metrics_history["train_online_accuracy"] == [pytest.approx(0.25)]
+    assert metrics_history["train_accuracy"] == [pytest.approx(0.75)]
+    assert metrics_history["test_accuracy"] == [pytest.approx(0.5)]
+
+
 def test_train_model_uses_artifact_dir_from_config(tmp_path, monkeypatch):
     captured = {}
 

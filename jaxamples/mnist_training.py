@@ -46,6 +46,15 @@ def _get_training_value(config: TrainingConfigInput, key: str) -> Any:
     return training[key]
 
 
+def _get_training_value_or_default(
+    config: TrainingConfigInput, key: str, default: Any
+) -> Any:
+    training = _get_training_section(config)
+    if isinstance(training, TrainingConfig):
+        return getattr(training, key, default)
+    return training.get(key, default)
+
+
 def _get_augmentation_dict(config: TrainingConfigInput) -> Dict[str, Any]:
     augmentation = _get_training_value(config, "augmentation")
     if hasattr(augmentation, "to_dict"):
@@ -73,6 +82,31 @@ def _get_metrics_paths(config: TrainingConfigInput) -> Tuple[str, str]:
     return (
         str(Path(output_dir) / "test_accuracy_metrics.csv"),
         str(Path(output_dir) / "test_accuracy_metrics.png"),
+    )
+
+
+def _build_clean_eval_dataloader(train_dataloader: DataLoader) -> DataLoader:
+    dataset = getattr(train_dataloader, "dataset", None)
+    if dataset is None:
+        return train_dataloader
+
+    batch_size = getattr(train_dataloader, "batch_size", None) or 1
+    num_workers = getattr(train_dataloader, "num_workers", 0)
+    pin_memory = getattr(train_dataloader, "pin_memory", False)
+    collate_fn = getattr(train_dataloader, "collate_fn", None)
+    persistent_workers = bool(
+        num_workers > 0 and getattr(train_dataloader, "persistent_workers", False)
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=False,
+        pin_memory=pin_memory,
+        collate_fn=collate_fn,
+        persistent_workers=persistent_workers,
     )
 
 
@@ -428,11 +462,20 @@ def visualize_incorrect_classifications(
 
 
 def lr_schedule(epoch: int, config: TrainingConfigInput) -> float:
-    total_epochs = _get_training_value(config, "start_epoch") + _get_training_value(
-        config, "num_epochs_to_train_now"
-    )
+    start_epoch = _get_training_value_or_default(config, "start_epoch", 0)
+    total_epochs = start_epoch + _get_training_value(config, "num_epochs_to_train_now")
     base_lr = _get_training_value(config, "base_learning_rate")
-    return 0.5 * base_lr * (1 + jnp.cos(jnp.pi * epoch / total_epochs))
+    if total_epochs <= 0:
+        return 0.0
+
+    warmup_epochs = _get_training_value_or_default(config, "warmup_epochs", 0)
+
+    if warmup_epochs > 0 and epoch < warmup_epochs:
+        return base_lr * (epoch + 1) / warmup_epochs
+
+    cosine_epochs = max(1, total_epochs - warmup_epochs)
+    cosine_epoch = min(max(0, epoch - warmup_epochs), cosine_epochs)
+    return 0.5 * base_lr * (1 + jnp.cos(jnp.pi * cosine_epoch / cosine_epochs))
 
 
 def create_optimizer(
@@ -657,21 +700,25 @@ def train_model(
         "train_accuracy": [],
         "train_accuracy_mean": [],
         "train_accuracy_spread": [],
+        "train_online_loss": [],
+        "train_online_accuracy": [],
         "test_loss": [],
         "test_accuracy": [],
         "test_accuracy_mean": [],
         "test_accuracy_spread": [],
     }
     augmentation_params = augmentation_params_cls(**_get_augmentation_dict(config))
+    train_eval_dataloader = _build_clean_eval_dataloader(train_dataloader)
 
     initial_lr = _get_training_value(config, "base_learning_rate")
-    optimizer = create_optimizer_fn(model, initial_lr, 1e-4)
+    initial_weight_decay = _get_training_value_or_default(config, "weight_decay", 1e-4)
+    optimizer = create_optimizer_fn(model, initial_lr, initial_weight_decay)
 
     for epoch in range(
         start_epoch, start_epoch + _get_training_value(config, "num_epochs_to_train_now")
     ):
         learning_rate = lr_schedule_fn(epoch, config)
-        weight_decay = min(1e-4, learning_rate / 10)
+        weight_decay = _get_training_value_or_default(config, "weight_decay", 1e-4)
 
         print(f"Epoch: {epoch}, Learning rate: {learning_rate:.6e}")
 
@@ -694,11 +741,32 @@ def train_model(
             last_train_batch, epoch, num_images=9, output_dir=output_dir
         )
 
-        for metric, value in metrics.compute().items():
-            metrics_history[f"train_{metric}"].append(value.item())
+        train_online_metrics = metrics.compute()
+        for metric, value in train_online_metrics.items():
+            metrics_history[f"train_online_{metric}"].append(value.item())
+        metrics_history["train_loss"].append(train_online_metrics["loss"].item())
         print(
-            f"[train] epoch: {epoch}, loss: {metrics_history['train_loss'][-1]:.4f}, "
-            f"accuracy: {metrics_history['train_accuracy'][-1]:.4f}"
+            f"[train-online] epoch: {epoch}, "
+            f"loss: {metrics_history['train_online_loss'][-1]:.4f}, "
+            f"accuracy: {metrics_history['train_online_accuracy'][-1]:.4f}"
+        )
+
+        metrics.reset()
+        num_train_eval_batches = 0
+        for train_eval_batch in train_eval_dataloader:
+            train_eval_batch = jax_collate_fn(train_eval_batch)
+            eval_step_fn(model, metrics, train_eval_batch)
+            num_train_eval_batches += 1
+        if num_train_eval_batches == 0:
+            raise ValueError(
+                "train_dataloader did not yield any clean evaluation batches. "
+                "Reduce batch_size or disable drop_last."
+            )
+        train_eval_metrics = metrics.compute()
+        metrics_history["train_accuracy"].append(train_eval_metrics["accuracy"].item())
+        metrics.reset()
+        print(
+            f"[train] epoch: {epoch}, clean accuracy: {metrics_history['train_accuracy'][-1]:.4f}"
         )
 
         metrics.reset()
@@ -812,6 +880,10 @@ def save_model_visualization(
 CKPT_EXTENSION = ".msgpack"
 
 
+class IncompatibleCheckpointError(ValueError):
+    """Raised when checkpoint contents do not match the current model state."""
+
+
 def _to_numpy_tree(tree: Dict[str, Any]) -> Dict[str, Any]:
     def _convert(x):
         value = jax.device_get(x)
@@ -851,7 +923,14 @@ def load_model(model: nnx.Module, ckpt_dir: str, epoch: int, seed: int) -> nnx.M
         "keys": nnx.to_pure_dict(keys_state),
         "state": nnx.to_pure_dict(params_state),
     }
-    restored_payload = serialization.from_bytes(template, raw_bytes)
+    try:
+        restored_payload = serialization.from_bytes(template, raw_bytes)
+    except ValueError as exc:
+        raise IncompatibleCheckpointError(
+            f"Checkpoint at {ckpt_path} is incompatible with the current model. "
+            "Use a fresh checkpoint directory or remove the old checkpoints before "
+            "starting this configuration."
+        ) from exc
     restored_keys = jax.tree_util.tree_map(
         lambda x: jax.random.wrap_key_data(x)
         if isinstance(x, np.ndarray)
