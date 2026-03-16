@@ -1,0 +1,64 @@
+{
+  "model": {
+    "depth": 4,
+    "embed_dim": 192,
+    "head_dropout_rate": 0.1,
+    "head_hidden_dim": 192,
+    "img_size": 28,
+    "num_classes": 10,
+    "num_heads": 6,
+    "num_storage_tokens": 0,
+    "patch_size": 4,
+    "pool_features": "cls_mean"
+  },
+  "onnx": {
+    "input_params": {
+      "deterministic": true
+    },
+    "input_shapes": [
+      [
+        "B",
+        28,
+        28,
+        1
+      ]
+    ],
+    "model_name": "mnist_dinov3_model",
+    "output_path": "/home/enpasos/projects/jaxamples/onnx/mnist_dinov3_model.onnx"
+  },
+  "seed": 5678,
+  "training": {
+    "augmentation": {
+      "elastic_alpha": 1.2,
+      "elastic_probability": 0.35,
+      "elastic_sigma": 0.7,
+      "enable_elastic": true,
+      "enable_rect_erasing": false,
+      "enable_rotation": true,
+      "enable_scaling": true,
+      "enable_translation": true,
+      "max_rotation": 10.0,
+      "max_translation": 2.5,
+      "rect_erase_height": 2,
+      "rect_erase_width": 20,
+      "rect_erasing_probability": 0.0,
+      "rotation_probability": 0.7,
+      "scale_max_x": 1.1,
+      "scale_max_y": 1.1,
+      "scale_min_x": 0.9,
+      "scale_min_y": 0.9,
+      "scaling_probability": 0.7,
+      "translation_probability": 0.8
+    },
+    "base_learning_rate": 0.0001,
+    "batch_size": 64,
+    "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/dinov3_p4_dim192_d4_h6_cls_mean_checkpoints",
+    "data_dir": "./data",
+    "enable_training": true,
+    "num_epochs_to_train_now": 500,
+    "output_dir": "/home/enpasos/projects/jaxamples/output",
+    "start_epoch": 0,
+    "warmup_epochs": 5,
+    "weight_decay": 0.0001
+  }
+}
