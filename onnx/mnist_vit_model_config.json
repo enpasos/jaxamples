@@ -1,21 +1,25 @@
 {
   "model": {
-    "attention_dropout_rate": 0.5,
+    "attention_dropout_rate": 0.1,
     "embed_dims": [
       32,
       128,
       256
     ],
-    "embedding_dropout_rate": 0.5,
+    "embedding_dropout_rate": 0.1,
     "embedding_type": "conv",
+    "head_dropout_rate": 0.1,
+    "head_hidden_dim": 256,
     "height": 28,
     "kernel_size": 3,
-    "mlp_dim": 256,
-    "mlp_dropout_rate": 0.5,
+    "mlp_dim": 512,
+    "mlp_dropout_rate": 0.1,
     "num_classes": 10,
     "num_heads": 4,
     "num_hiddens": 256,
     "num_layers": 4,
+    "patch_size": 4,
+    "pool_features": "cls_mean",
     "strides": [
       1,
       2,
@@ -64,7 +68,7 @@
     },
     "base_learning_rate": 0.0001,
     "batch_size": 64,
-    "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/checkpoints",
+    "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/mnist_vit_cls_mean_checkpoints",
     "data_dir": "./data",
     "enable_training": true,
     "num_epochs_to_train_now": 500,

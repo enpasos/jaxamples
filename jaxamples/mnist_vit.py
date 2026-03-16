@@ -1,12 +1,19 @@
 # file: jaxamples/mnist_vit.py
 import os
-from typing import Dict
+from math import prod
+from typing import Dict, Sequence
 
 import jax.numpy as jnp
 import onnx
 from flax import nnx
 from jax2onnx import allclose, to_onnx
-from jax2onnx.plugins.examples.nnx.vit import VisionTransformer
+from jax2onnx.plugins.examples.nnx.vit import (
+    ConcatClsToken,
+    ConvEmbedding,
+    PatchEmbedding,
+    PositionalEmbedding,
+    TransformerStack,
+)
 
 from jaxamples import mnist_training as mnist_training_lib
 from jaxamples.mnist_config import (
@@ -60,6 +67,112 @@ def create_sinusoidal_embeddings(num_patches: int, num_hiddens: int) -> jnp.ndar
     pos_embedding = pos_embedding.at[:, 0::2].set(jnp.sin(position * div_term))
     pos_embedding = pos_embedding.at[:, 1::2].set(jnp.cos(position * div_term))
     return pos_embedding[jnp.newaxis, :, :]
+
+
+class VisionTransformer(nnx.Module):
+    """MNIST-focused ViT with a stronger classifier head."""
+
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        num_hiddens: int,
+        num_layers: int,
+        num_heads: int,
+        mlp_dim: int,
+        num_classes: int,
+        embed_dims: Sequence[int] = (32, 128, 256),
+        kernel_size: int = 3,
+        strides: Sequence[int] = (1, 2, 2),
+        embedding_type: str = "conv",
+        embedding_dropout_rate: float = 0.1,
+        attention_dropout_rate: float = 0.1,
+        mlp_dropout_rate: float = 0.1,
+        patch_size: int = 4,
+        head_hidden_dim: int = 256,
+        head_dropout_rate: float = 0.1,
+        pool_features: str = "cls_mean",
+        *,
+        rngs: nnx.Rngs,
+    ):
+        if embedding_type not in {"conv", "patch"}:
+            raise ValueError("embedding_type must be either 'conv' or 'patch'")
+        if pool_features not in {"cls", "cls_mean"}:
+            raise ValueError("pool_features must be either 'cls' or 'cls_mean'")
+
+        self.pool_features = pool_features
+        embed_dims = tuple(embed_dims)
+        strides = tuple(strides)
+
+        if embedding_type == "conv":
+            self.embedding = ConvEmbedding(
+                W=width,
+                H=height,
+                embed_dims=embed_dims,
+                kernel_size=kernel_size,
+                strides=strides,
+                dropout_rate=embedding_dropout_rate,
+                rngs=rngs,
+            )
+            downsample_factor = prod(strides)
+            num_patches = (height // downsample_factor) * (width // downsample_factor)
+        else:
+            self.embedding = PatchEmbedding(
+                height=height,
+                width=width,
+                patch_size=patch_size,
+                num_hiddens=num_hiddens,
+                in_features=1,
+                rngs=rngs,
+            )
+            num_patches = (height // patch_size) * (width // patch_size)
+
+        self.concat_cls_token = ConcatClsToken(num_hiddens=num_hiddens, rngs=rngs)
+        self.positional_embedding = PositionalEmbedding(
+            num_hiddens=num_hiddens,
+            num_patches=num_patches,
+        )
+        self.transformer_stack = TransformerStack(
+            num_hiddens,
+            num_heads,
+            mlp_dim,
+            num_layers,
+            attention_dropout_rate,
+            mlp_dropout_rate,
+            rngs=rngs,
+        )
+
+        head_input_dim = num_hiddens if pool_features == "cls" else num_hiddens * 2
+        self.head_norm = nnx.LayerNorm(head_input_dim, rngs=rngs)
+        self.head_hidden = nnx.Linear(head_input_dim, head_hidden_dim, rngs=rngs)
+        self.head_dropout = nnx.Dropout(rate=head_dropout_rate, rngs=rngs)
+        self.head_out = nnx.Linear(head_hidden_dim, num_classes, rngs=rngs)
+
+    def _pool_tokens(self, tokens: jnp.ndarray) -> jnp.ndarray:
+        cls_token = tokens[:, 0, :]
+        if self.pool_features == "cls":
+            return cls_token
+
+        patch_tokens = tokens[:, 1:, :]
+        mean_pooled = jnp.mean(patch_tokens, axis=1)
+        return jnp.concatenate([cls_token, mean_pooled], axis=-1)
+
+    def __call__(self, x: jnp.ndarray, deterministic: bool = True) -> jnp.ndarray:
+        if x is None or x.shape[0] == 0:
+            raise ValueError("Input tensor 'x' must not be None or empty.")
+        if len(x.shape) != 4 or x.shape[-1] != 1:
+            raise ValueError("Input tensor 'x' must have shape (B, H, W, 1).")
+
+        x = self.embedding(x, deterministic=deterministic)
+        x = self.concat_cls_token(x)
+        x = self.positional_embedding(x)
+        x = self.transformer_stack(x, deterministic=deterministic)
+        x = self._pool_tokens(x)
+        x = self.head_norm(x)
+        x = self.head_hidden(x)
+        x = nnx.gelu(x, approximate=False)
+        x = self.head_dropout(x, deterministic=deterministic)
+        return self.head_out(x)
 
 
 def train_model(
@@ -119,7 +232,7 @@ def get_default_config() -> MnistExampleConfig:
     return MnistExampleConfig(
         seed=5678,
         training=shared_mnist_training_config(
-            checkpoint_dir=os.path.abspath("./data/checkpoints/"),
+            checkpoint_dir=os.path.abspath("./data/mnist_vit_cls_mean_checkpoints/"),
             output_dir=default_output_dir,
         ),
         model=MnistVitModelConfig(
@@ -128,15 +241,18 @@ def get_default_config() -> MnistExampleConfig:
             num_hiddens=256,
             num_layers=4,
             num_heads=4,
-            mlp_dim=256,
+            mlp_dim=512,
             num_classes=10,
             embed_dims=[32, 128, 256],
             kernel_size=3,
             strides=[1, 2, 2],
             embedding_type="conv",
-            embedding_dropout_rate=0.5,
-            attention_dropout_rate=0.5,
-            mlp_dropout_rate=0.5,
+            embedding_dropout_rate=0.1,
+            attention_dropout_rate=0.1,
+            mlp_dropout_rate=0.1,
+            head_hidden_dim=256,
+            head_dropout_rate=0.1,
+            pool_features="cls_mean",
         ),
         onnx=OnnxConfig(
             model_name="mnist_vit_model",

@@ -139,6 +139,10 @@ class MnistVitModelConfig(ConfigMixin):
     embedding_dropout_rate: float
     attention_dropout_rate: float
     mlp_dropout_rate: float
+    patch_size: int = 4
+    head_hidden_dim: int = 256
+    head_dropout_rate: float = 0.1
+    pool_features: str = "cls_mean"
 
     def validate(self) -> None:
         _require(self.height > 0, "height must be > 0.")
@@ -153,6 +157,7 @@ class MnistVitModelConfig(ConfigMixin):
         _require(self.kernel_size > 0, "kernel_size must be > 0.")
         _require(bool(self.strides), "strides must not be empty.")
         _require(all(step > 0 for step in self.strides), "strides must all be > 0.")
+        _require(self.patch_size > 0, "patch_size must be > 0.")
         _require(
             len(self.embed_dims) == len(self.strides),
             "embed_dims and strides must have the same length.",
@@ -161,9 +166,20 @@ class MnistVitModelConfig(ConfigMixin):
             self.embedding_type in {"conv", "patch"},
             "embedding_type must be 'conv' or 'patch'.",
         )
+        if self.embedding_type == "patch":
+            _require(
+                self.height % self.patch_size == 0 and self.width % self.patch_size == 0,
+                "height and width must be divisible by patch_size for patch embedding.",
+            )
         _validate_dropout(self.embedding_dropout_rate, "embedding_dropout_rate")
         _validate_dropout(self.attention_dropout_rate, "attention_dropout_rate")
         _validate_dropout(self.mlp_dropout_rate, "mlp_dropout_rate")
+        _require(self.head_hidden_dim > 0, "head_hidden_dim must be > 0.")
+        _validate_dropout(self.head_dropout_rate, "head_dropout_rate")
+        _require(
+            self.pool_features in {"cls", "cls_mean"},
+            "pool_features must be 'cls' or 'cls_mean'.",
+        )
 
 
 @dataclass

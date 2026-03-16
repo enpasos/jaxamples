@@ -76,6 +76,19 @@ def create_model():
     return mnist_vit.VisionTransformer(**model_params)
 
 
+def test_get_default_config_uses_mnist_friendly_vit_defaults():
+    config = mnist_vit.get_default_config()
+
+    assert config.training.checkpoint_dir.endswith("mnist_vit_cls_mean_checkpoints")
+    assert config.model.mlp_dim == 512
+    assert config.model.embedding_dropout_rate == pytest.approx(0.1)
+    assert config.model.attention_dropout_rate == pytest.approx(0.1)
+    assert config.model.mlp_dropout_rate == pytest.approx(0.1)
+    assert config.model.pool_features == "cls_mean"
+    assert config.model.head_hidden_dim == 256
+    assert config.model.head_dropout_rate == pytest.approx(0.1)
+
+
 # TESTED
 def test_get_dataset_torch_dataloaders(monkeypatch):
     class DummyMNIST:
