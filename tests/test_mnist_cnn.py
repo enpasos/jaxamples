@@ -49,7 +49,7 @@ def test_mnist_cnn_default_config_uses_shared_augmentation():
     assert cnn_config.training.augmentation.max_rotation == pytest.approx(10.0)
     assert cnn_config.training.augmentation.rotation_probability == pytest.approx(0.7)
     assert cnn_config.training.augmentation.elastic_alpha == pytest.approx(1.2)
-    assert cnn_config.training.augmentation.elastic_sigma == pytest.approx(0.7)
+    assert cnn_config.training.augmentation.elastic_sigma == pytest.approx(0.9)
     assert cnn_config.training.augmentation.elastic_probability == pytest.approx(0.35)
     assert cnn_config.training.checkpoint_dir.endswith("cnn_c32_64_128_128_d256_checkpoints")
     assert cnn_config.model.conv_channels == [32, 64, 128, 128]

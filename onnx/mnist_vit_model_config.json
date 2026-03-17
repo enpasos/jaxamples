@@ -47,7 +47,7 @@
     "augmentation": {
       "elastic_alpha": 1.2,
       "elastic_probability": 0.35,
-      "elastic_sigma": 0.7,
+      "elastic_sigma": 0.9,
       "enable_elastic": true,
       "enable_rect_erasing": false,
       "enable_rotation": true,

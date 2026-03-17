@@ -315,7 +315,7 @@ def shared_mnist_augmentation_config() -> AugmentationConfig:
         rotation_probability=0.7,
         enable_elastic=True,
         elastic_alpha=1.2,
-        elastic_sigma=0.7,
+        elastic_sigma=0.9,
         elastic_probability=0.35,
         enable_rect_erasing=False,
         rect_erase_height=2,
