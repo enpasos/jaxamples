@@ -1,6 +1,5 @@
 import argparse
 import os
-from pathlib import Path
 from typing import Sequence
 
 from jaxamples.mnist_config import MnistExampleConfig

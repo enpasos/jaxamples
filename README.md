@@ -48,3 +48,8 @@ poetry run python -m compileall jaxamples tests
 poetry run ruff check jaxamples tests
 poetry run pytest -q
 ```
+
+To mirror the GitHub Actions CI job more closely, including `poetry install` and the CI Poetry environment variables, run:
+```
+bash scripts/run_ci_local.sh
+```
