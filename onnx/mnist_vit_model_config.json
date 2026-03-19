@@ -73,7 +73,7 @@
     "enable_training": true,
     "num_epochs_to_train_now": 500,
     "output_dir": "/home/enpasos/projects/jaxamples/output",
-    "start_epoch": 0,
+    "start_epoch": 2,
     "warmup_epochs": 5,
     "weight_decay": 0.0001
   }

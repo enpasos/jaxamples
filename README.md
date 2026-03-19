@@ -2,7 +2,7 @@
 Examples build on JAX, Flax, nnx. We use jax2onnx to convert models to onnx format.
 
 ### **Examples**
-* [`mnist_vit`](https://netron.app/?url=https://enpasos.github.io/jaxamples/mnist_vit_model.onnx) - MNIST classification using a vision transformer with convolutional embedding and a `cls_mean` classifier head.
+* [`mnist_vit`](https://netron.app/?url=https://enpasos.github.io/jaxamples/onnx/mnist_vit_model.onnx) - MNIST classification using a vision transformer with convolutional embedding and a `cls_mean` classifier head.
 * `mnist_dinov3` - MNIST classification using the DINOv3 Vision Transformer from `jax2onnx` plus a CLS classification head, configured with the same 500-epoch training budget and a denser 4x4 patch grid for a fairer comparison to `mnist_vit`.
 * `mnist_cnn` - convolutional MNIST baseline trained through the same shared pipeline and with the same default augmentation as `mnist_vit` and `mnist_dinov3`, so architecture comparisons land in the same benchmark memory.
 * `mnist_strong_cnn` - stronger residual CNN with LayerNorm, trained through the same default MNIST pipeline as the other examples so comparisons isolate the model architecture.
