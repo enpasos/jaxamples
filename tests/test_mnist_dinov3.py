@@ -101,7 +101,7 @@ def test_mnist_dinov3_config_rejects_non_divisible_patch_size():
 def test_mnist_dinov3_default_config_uses_fairer_budget():
     config = mnist_dinov3.get_default_config()
 
-    assert config.training.num_epochs_to_train_now == 500
+    assert config.training.num_epochs_to_train_now == 700
     assert config.training.weight_decay == pytest.approx(1e-4)
     assert config.training.checkpoint_dir.endswith(
         "dinov3_p4_dim192_d4_h6_cls_mean_checkpoints"

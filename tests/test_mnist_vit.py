@@ -838,3 +838,66 @@ def test_visualize_incorrect_classifications_caps_large_result_set(
     )
 
     assert (tmp_path / "incorrect_classifications_epoch4.png").exists()
+
+
+def test_visualize_incorrect_classifications_uses_single_line_titles(monkeypatch, tmp_path):
+    images = torch.ones(2, 1, 28, 28, dtype=torch.float32)
+    labels = torch.tensor([2, 5], dtype=torch.int64)
+    dataset = TensorDataset(images, labels)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
+
+    captured_titles = []
+    captured_suptitles = []
+    captured_layout_rects = []
+    saved_paths = []
+
+    class FakeAxes:
+        def imshow(self, *_args, **_kwargs):
+            return None
+
+        def set_title(self, title, **_kwargs):
+            captured_titles.append(title)
+
+        def axis(self, *_args, **_kwargs):
+            return None
+
+    class FakeFigure:
+        def suptitle(self, title):
+            captured_suptitles.append(title)
+
+        def tight_layout(self, rect=None):
+            captured_layout_rects.append(rect)
+
+    class FakePyplot:
+        def subplots(self, num_rows, num_cols, figsize):
+            axes = np.array(
+                [[FakeAxes() for _ in range(num_cols)] for _ in range(num_rows)],
+                dtype=object,
+            )
+            return FakeFigure(), axes
+
+        def savefig(self, path):
+            saved_paths.append(Path(path))
+            Path(path).write_text("stub", encoding="utf-8")
+
+        def close(self, _fig):
+            return None
+
+    monkeypatch.setattr(
+        mnist_training,
+        "pred_step",
+        lambda _model, batch: jnp.array([7, 3], dtype=jnp.int32),
+    )
+    monkeypatch.setattr(mnist_training, "_get_pyplot", lambda: FakePyplot())
+
+    mnist_vit.visualize_incorrect_classifications(
+        object(),
+        dataloader,
+        epoch=7,
+        output_dir=str(tmp_path),
+    )
+
+    assert captured_suptitles == ["classification / truth"]
+    assert captured_titles == ["7 / 2", "3 / 5"]
+    assert captured_layout_rects == [(0.0, 0.0, 1.0, 0.96)]
+    assert saved_paths == [tmp_path / "incorrect_classifications_epoch7.png"]

@@ -509,18 +509,20 @@ def visualize_incorrect_classifications(
     if figsize == (15, 5):
         figsize = (max(6, num_cols * 1.8), max(3, num_rows * 2.2))
     fig, axes = plt.subplots(num_rows, num_cols, figsize=figsize)
+    fig.suptitle("classification / truth")
     axes = np.atleast_1d(axes).reshape(num_rows, num_cols)
     for i, ax in enumerate(axes.flatten()):
         if i >= num_images:
             ax.axis("off")
             continue
         ax.imshow(incorrect_images_typed[i, ..., 0], cmap="gray")
-        ax.set_title(f"{incorrect_labels[i]}\nbut\n{incorrect_preds[i]}")
+        ax.set_title(f"{int(incorrect_preds[i])} / {int(incorrect_labels[i])}", pad=4)
         ax.axis("off")
 
     output_path = _build_output_path(
         f"incorrect_classifications_epoch{epoch}.png", output_dir
     )
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
     plt.savefig(output_path)
     plt.close(fig)
 
