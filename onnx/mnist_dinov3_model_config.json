@@ -1,15 +1,17 @@
 {
   "model": {
-    "depth": 4,
-    "embed_dim": 192,
+    "depth": 6,
+    "embed_dim": 256,
     "head_dropout_rate": 0.1,
-    "head_hidden_dim": 192,
+    "head_hidden_dim": 256,
     "img_size": 28,
     "num_classes": 10,
-    "num_heads": 6,
+    "num_heads": 8,
     "num_storage_tokens": 0,
     "patch_size": 4,
-    "pool_features": "cls_mean"
+    "pool_features": "cls_mean",
+    "stem_hidden_dim": 32,
+    "use_conv_stem": true
   },
   "onnx": {
     "input_params": {
@@ -30,15 +32,15 @@
   "training": {
     "augmentation": {
       "elastic_alpha": 1.2,
-      "elastic_probability": 0.35,
-      "elastic_sigma": 0.9,
+      "elastic_probability": 0.3,
+      "elastic_sigma": 1.0,
       "enable_elastic": true,
       "enable_rect_erasing": false,
       "enable_rotation": true,
       "enable_scaling": true,
       "enable_translation": true,
-      "max_rotation": 10.0,
-      "max_translation": 2.5,
+      "max_rotation": 12.0,
+      "max_translation": 4.0,
       "rect_erase_height": 2,
       "rect_erase_width": 20,
       "rect_erasing_probability": 0.0,
@@ -47,15 +49,15 @@
       "scale_max_y": 1.1,
       "scale_min_x": 0.9,
       "scale_min_y": 0.9,
-      "scaling_probability": 0.7,
+      "scaling_probability": 0.6,
       "translation_probability": 0.8
     },
     "base_learning_rate": 0.0001,
     "batch_size": 64,
-    "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/dinov3_p4_dim192_d4_h6_cls_mean_checkpoints",
+    "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/dinov3_p4_dim256_d6_h8_cls_mean_stem32_checkpoints",
     "data_dir": "./data",
     "enable_training": true,
-    "num_epochs_to_train_now": 500,
+    "num_epochs_to_train_now": 700,
     "output_dir": "/home/enpasos/projects/jaxamples/output",
     "start_epoch": 0,
     "warmup_epochs": 5,

@@ -104,15 +104,17 @@ def test_mnist_dinov3_default_config_uses_fairer_budget():
     assert config.training.num_epochs_to_train_now == 700
     assert config.training.weight_decay == pytest.approx(1e-4)
     assert config.training.checkpoint_dir.endswith(
-        "dinov3_p4_dim192_d4_h6_cls_mean_checkpoints"
+        "dinov3_p4_dim256_d6_h8_cls_mean_stem32_checkpoints"
     )
     assert config.model.patch_size == 4
-    assert config.model.embed_dim == 192
-    assert config.model.depth == 4
-    assert config.model.num_heads == 6
-    assert config.model.head_hidden_dim == 192
+    assert config.model.embed_dim == 256
+    assert config.model.depth == 6
+    assert config.model.num_heads == 8
+    assert config.model.head_hidden_dim == 256
     assert config.model.head_dropout_rate == pytest.approx(0.1)
     assert config.model.pool_features == "cls_mean"
+    assert config.model.use_conv_stem is True
+    assert config.model.stem_hidden_dim == 32
 
 
 def test_lr_schedule_applies_warmup_before_cosine_decay():

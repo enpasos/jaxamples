@@ -221,6 +221,8 @@ class MnistDinoV3ModelConfig(ConfigMixin):
     head_hidden_dim: int = 192
     head_dropout_rate: float = 0.1
     pool_features: str = "cls_mean"
+    use_conv_stem: bool = True
+    stem_hidden_dim: int = 32
 
     def validate(self) -> None:
         _require(self.img_size > 0, "img_size must be > 0.")
@@ -239,6 +241,7 @@ class MnistDinoV3ModelConfig(ConfigMixin):
         _require(self.num_classes >= 2, "num_classes must be >= 2.")
         _require(self.num_storage_tokens >= 0, "num_storage_tokens must be >= 0.")
         _require(self.head_hidden_dim > 0, "head_hidden_dim must be > 0.")
+        _require(self.stem_hidden_dim > 0, "stem_hidden_dim must be > 0.")
         _validate_dropout(self.head_dropout_rate, "head_dropout_rate")
         _require(
             self.pool_features in {"cls", "cls_mean"},

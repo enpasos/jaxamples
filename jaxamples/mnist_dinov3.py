@@ -56,6 +56,41 @@ def prepare_dinov3_inputs(
     return nchw_images
 
 
+class MnistDinoV3ConvStem(nnx.Module):
+    """Light conv stem that gives the DINO backbone a stronger MNIST front-end."""
+
+    def __init__(self, *, hidden_dim: int, rngs: nnx.Rngs):
+        params_key = rngs.params()
+        conv1_key, norm1_key, conv2_key, norm2_key = jax.random.split(params_key, 4)
+
+        self.conv1 = nnx.Conv(
+            in_features=1,
+            out_features=hidden_dim,
+            kernel_size=(3, 3),
+            padding="SAME",
+            use_bias=False,
+            rngs=nnx.Rngs(conv1_key),
+        )
+        self.norm1 = nnx.LayerNorm(hidden_dim, rngs=nnx.Rngs(norm1_key))
+        self.conv2 = nnx.Conv(
+            in_features=hidden_dim,
+            out_features=3,
+            kernel_size=(3, 3),
+            padding="SAME",
+            use_bias=False,
+            rngs=nnx.Rngs(conv2_key),
+        )
+        self.norm2 = nnx.LayerNorm(3, rngs=nnx.Rngs(norm2_key))
+
+    def __call__(self, images: jax.Array) -> jax.Array:
+        features = self.conv1(images)
+        features = self.norm1(features)
+        features = nnx.gelu(features, approximate=False)
+        features = self.conv2(features)
+        features = self.norm2(features)
+        return nnx.gelu(features, approximate=False)
+
+
 class MnistDinoV3Classifier(nnx.Module):
     """Small MNIST classifier using the DINOv3 ViT backbone from jax2onnx."""
 
@@ -72,16 +107,23 @@ class MnistDinoV3Classifier(nnx.Module):
         head_hidden_dim: int = 192,
         head_dropout_rate: float = 0.1,
         pool_features: str = "cls_mean",
+        use_conv_stem: bool = True,
+        stem_hidden_dim: int = 32,
         rngs: nnx.Rngs,
     ):
         params_key = rngs.params()
-        backbone_key, head_key = jax.random.split(params_key)
+        stem_key, backbone_key, head_key = jax.random.split(params_key, 3)
         head_norm_key, head_hidden_key, head_dropout_key, head_out_key = jax.random.split(
             head_key, 4
         )
 
         self.img_size = int(img_size)
         self.pool_features = pool_features
+        self.input_stem = (
+            MnistDinoV3ConvStem(hidden_dim=stem_hidden_dim, rngs=nnx.Rngs(stem_key))
+            if use_conv_stem
+            else None
+        )
         self.backbone = DinoVisionTransformer(
             img_size=img_size,
             patch_size=patch_size,
@@ -144,7 +186,10 @@ class MnistDinoV3Classifier(nnx.Module):
     def __call__(
         self, images: jax.Array, *, deterministic: bool = True
     ) -> jax.Array:
-        backbone_inputs = prepare_dinov3_inputs(images, expected_size=self.img_size)
+        stemmed_images = self.input_stem(images) if self.input_stem is not None else images
+        backbone_inputs = prepare_dinov3_inputs(
+            stemmed_images, expected_size=self.img_size
+        )
         tokens = self._encode_backbone(backbone_inputs)
         head_features = self._pool_head_features(tokens)
         head_features = self.head_norm(head_features)
@@ -160,14 +205,16 @@ def get_default_config() -> MnistExampleConfig:
     model_config = MnistDinoV3ModelConfig(
         img_size=28,
         patch_size=4,
-        embed_dim=192,
-        depth=4,
-        num_heads=6,
+        embed_dim=256,
+        depth=6,
+        num_heads=8,
         num_classes=10,
         num_storage_tokens=0,
-        head_hidden_dim=192,
+        head_hidden_dim=256,
         head_dropout_rate=0.1,
         pool_features="cls_mean",
+        use_conv_stem=True,
+        stem_hidden_dim=32,
     )
     checkpoint_name = (
         "dinov3_"
@@ -175,7 +222,8 @@ def get_default_config() -> MnistExampleConfig:
         f"dim{model_config.embed_dim}_"
         f"d{model_config.depth}_"
         f"h{model_config.num_heads}_"
-        f"{model_config.pool_features}_checkpoints"
+        f"{model_config.pool_features}_"
+        f"{'stem' + str(model_config.stem_hidden_dim) if model_config.use_conv_stem else 'nostem'}_checkpoints"
     )
     return MnistExampleConfig(
         seed=5678,
@@ -183,7 +231,8 @@ def get_default_config() -> MnistExampleConfig:
             checkpoint_dir=os.path.abspath(os.path.join("./data", checkpoint_name)),
             output_dir=default_output_dir,
         ),
-        # Match the ViT example more closely on token count and parameter budget.
+        # Borrow a stronger local front-end and a slightly larger backbone to close the
+        # gap to the stronger MNIST ViT baseline.
         model=model_config,
         onnx=OnnxConfig(
             model_name="mnist_dinov3_model",
