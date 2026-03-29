@@ -3,6 +3,7 @@ Examples build on JAX, Flax, nnx. We use jax2onnx to convert models to onnx form
 
 ### **Examples**
 * [`mnist_vit`](https://netron.app/?url=https://enpasos.github.io/jaxamples/onnx/mnist_vit_model.onnx) - MNIST classification using a vision transformer with convolutional embedding and a `cls_mean` classifier head.
+* `mnist_vit_augsearch` - alternative ViT training path that starts from zero augmentation and increases both augmentation probability and scope only when the clean training error target is re-achieved within a fixed probe budget.
 * `mnist_dinov3` - MNIST classification using the DINOv3 Vision Transformer from `jax2onnx` plus a CLS classification head, configured with the same 700-epoch training budget and a denser 4x4 patch grid for a fairer comparison to `mnist_vit`.
 * `mnist_cnn` - convolutional MNIST baseline trained through the same shared pipeline and with the same default augmentation as `mnist_vit` and `mnist_dinov3`, so architecture comparisons land in the same benchmark memory.
 * `mnist_strong_cnn` - stronger residual CNN with LayerNorm, trained through the same default MNIST pipeline as the other examples so comparisons isolate the model architecture.
@@ -12,6 +13,7 @@ Install dependencies, train the model and export it to onnx format:
 ```  
 poetry install
 poetry run python jaxamples/mnist_vit.py
+poetry run python jaxamples/mnist_vit_augsearch.py
 poetry run python jaxamples/mnist_dinov3.py
 poetry run python jaxamples/mnist_cnn.py
 poetry run python jaxamples/mnist_strong_cnn.py
@@ -28,6 +30,7 @@ poetry run python jaxamples/mnist_strong_cnn_run_onnx.py
 Quick overrides for both training scripts:
 ```
 poetry run python jaxamples/mnist_vit.py --epochs 5 --batch-size 128
+poetry run python jaxamples/mnist_vit_augsearch.py --train-error-threshold 60 --probe-budget-epochs 10
 poetry run python jaxamples/mnist_dinov3.py --skip-training --checkpoint-dir ./data/dinov3_checkpoints
 poetry run python jaxamples/mnist_vit.py --output-dir ./runs/mnist-vit
 ```

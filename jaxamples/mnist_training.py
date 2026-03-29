@@ -387,8 +387,11 @@ def augment_data_batch(
             random.uniform(rect_apply_key)
             < getattr(augmentation_params, "rect_erasing_probability", 1.0),
         )
-        erase_h = getattr(augmentation_params, "rect_erase_height", 6)
-        erase_w = getattr(augmentation_params, "rect_erase_width", 6)
+        # Keep the erase window within the actual image bounds so the
+        # augmentation stays valid even if an outer search proposes
+        # oversized rectangles.
+        erase_h = max(1, min(int(getattr(augmentation_params, "rect_erase_height", 6)), height))
+        erase_w = max(1, min(int(getattr(augmentation_params, "rect_erase_width", 6)), width))
 
         def _apply_rect_erasing(img: jnp.ndarray) -> jnp.ndarray:
             max_y = height - erase_h
