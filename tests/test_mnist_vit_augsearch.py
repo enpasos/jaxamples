@@ -309,6 +309,176 @@ def test_search_parameter_frontier_respects_margin_retention_threshold():
     assert evaluation.margin_retention >= 0.9
 
 
+def test_search_parameter_candidates_can_choose_interior_sigma_value():
+    search_config = mnist_vit_augsearch.AugmentationSearchConfig(
+        invariance_threshold=0.95,
+        margin_retention_threshold=0.9,
+        strength_step=0.25,
+        min_strength_step=0.05,
+    )
+    candidate_values = [0.0, 0.2, 0.35, 0.6, 1.0]
+
+    frontier, evaluation = mnist_vit_augsearch.search_parameter_candidates(
+        0.0,
+        candidate_values,
+        lambda value: mnist_vit_augsearch.CandidateEvaluation(
+            retention=0.95 + abs(value - 0.35),
+            mean_margin=1.0,
+            margin_retention=0.90 + abs(value - 0.35),
+        ),
+        search_config,
+    )
+
+    assert frontier == pytest.approx(0.35)
+    assert evaluation.retention == pytest.approx(0.95)
+    assert evaluation.margin_retention == pytest.approx(0.90)
+
+
+def test_effective_search_config_anneals_steps_from_train_plateau_state():
+    search_config = mnist_vit_augsearch.AugmentationSearchConfig(
+        strength_step=0.2,
+        min_strength_step=0.05,
+        annealed_strength_step=0.04,
+        annealed_min_strength_step=0.01,
+        train_plateau_patience=10,
+        anneal_after_plateau_fraction=0.5,
+    )
+    state = replace(
+        mnist_vit_augsearch.default_search_state(search_config),
+        epochs_since_train_improvement=8,
+    )
+
+    effective = mnist_vit_augsearch._effective_search_config(search_config, state)
+
+    assert 0.04 < effective.strength_step < 0.2
+    assert 0.01 < effective.min_strength_step < 0.05
+
+
+def test_is_scheduled_search_epoch_starts_at_epoch_one():
+    search_config = mnist_vit_augsearch.AugmentationSearchConfig(
+        search_every_n_epochs=3,
+    )
+
+    assert mnist_vit_augsearch._is_scheduled_search_epoch(1, search_config) is True
+    assert mnist_vit_augsearch._is_scheduled_search_epoch(2, search_config) is False
+    assert mnist_vit_augsearch._is_scheduled_search_epoch(3, search_config) is False
+    assert mnist_vit_augsearch._is_scheduled_search_epoch(4, search_config) is True
+
+
+def test_should_refresh_artifacts_only_on_interval_and_final_epoch():
+    assert (
+        mnist_vit_augsearch._should_refresh_artifacts(
+            1,
+            final_epoch=6,
+            refresh_interval=5,
+        )
+        is False
+    )
+    assert (
+        mnist_vit_augsearch._should_refresh_artifacts(
+            5,
+            final_epoch=6,
+            refresh_interval=5,
+        )
+        is True
+    )
+    assert (
+        mnist_vit_augsearch._should_refresh_artifacts(
+            6,
+            final_epoch=6,
+            refresh_interval=5,
+        )
+        is True
+    )
+
+
+def test_update_search_train_plateau_state_freezes_from_clean_train_accuracy():
+    search_config = mnist_vit_augsearch.AugmentationSearchConfig(
+        train_plateau_window=2,
+        train_plateau_patience=2,
+        train_plateau_min_improvement=1e-4,
+    )
+    state = mnist_vit_augsearch.default_search_state(search_config)
+
+    state, metric, message = mnist_vit_augsearch.update_search_train_plateau_state(
+        state,
+        [0.99],
+        epoch=0,
+        search_config=search_config,
+    )
+    assert metric == pytest.approx(0.99)
+    assert message is None
+    assert state.best_train_accuracy_metric == pytest.approx(0.99)
+    assert state.epochs_since_train_improvement == 0
+    assert state.search_frozen is False
+
+    state, metric, message = mnist_vit_augsearch.update_search_train_plateau_state(
+        state,
+        [0.99, 0.99],
+        epoch=1,
+        search_config=search_config,
+    )
+    assert metric == pytest.approx(0.99)
+    assert message is None
+    assert state.epochs_since_train_improvement == 1
+    assert state.search_frozen is False
+
+    state, metric, message = mnist_vit_augsearch.update_search_train_plateau_state(
+        state,
+        [0.99, 0.99, 0.99],
+        epoch=2,
+        search_config=search_config,
+    )
+    assert metric == pytest.approx(0.99)
+    assert message is not None
+    assert state.epochs_since_train_improvement == 2
+    assert state.search_frozen is True
+    assert state.frozen_epoch == 2
+    assert state.last_event == "search_train_plateau_frozen"
+
+
+def test_search_augmentation_parameters_skips_when_search_is_frozen(monkeypatch):
+    config = mnist_vit_augsearch.get_default_config()
+    state = replace(
+        mnist_vit_augsearch.default_search_state(config.search),
+        search_frozen=True,
+        frozen_epoch=7,
+    )
+
+    monkeypatch.setattr(
+        mnist_vit_augsearch,
+        "_collect_anchor_set",
+        lambda *args, **kwargs: pytest.fail("frozen search must not collect anchors"),
+    )
+
+    next_state, anchor, updates = mnist_vit_augsearch.search_augmentation_parameters(
+        object(),
+        object(),
+        config.training.augmentation,
+        state,
+        config,
+        epoch=8,
+    )
+
+    assert anchor is None
+    assert updates == []
+    assert next_state.search_frozen is True
+    assert next_state.last_event == "search_frozen"
+
+
+def test_apply_search_overrides_updates_search_interval():
+    config = mnist_vit_augsearch.get_default_config()
+    args = mnist_vit_augsearch.parse_augsearch_args(
+        ["--search-every-n-epochs", "4"],
+        description="test",
+        default_onnx_output="out.onnx",
+    )
+
+    updated = mnist_vit_augsearch._apply_search_overrides(config, args)
+
+    assert updated.search.search_every_n_epochs == 4
+
+
 def test_collect_anchor_set_balances_classes(monkeypatch):
     model = create_small_model()
     images = torch.zeros(6, 1, 28, 28, dtype=torch.float32)

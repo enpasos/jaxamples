@@ -46,12 +46,19 @@
     "anchor_examples_per_class": 256,
     "anchor_max_examples": 2048,
     "anchor_min_margin": 0.5,
+    "anneal_after_plateau_fraction": 0.5,
+    "annealed_min_strength_step": 0.01,
+    "annealed_strength_step": 0.05,
     "candidate_samples": 3,
     "invariance_threshold": 0.995,
     "margin_retention_threshold": 0.9,
     "max_strength": 1.5,
     "min_strength_step": 0.05,
-    "strength_step": 0.2
+    "search_every_n_epochs": 2,
+    "strength_step": 0.2,
+    "train_plateau_min_improvement": 0.0001,
+    "train_plateau_patience": 30,
+    "train_plateau_window": 10
   },
   "seed": 5678,
   "training": {
@@ -84,7 +91,7 @@
     "enable_training": true,
     "num_epochs_to_train_now": 700,
     "output_dir": "/home/enpasos/projects/jaxamples/output/mnist_vit_augsearch",
-    "start_epoch": 24,
+    "start_epoch": 0,
     "warmup_epochs": 5,
     "weight_decay": 0.0001
   }

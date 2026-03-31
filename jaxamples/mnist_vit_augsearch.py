@@ -57,7 +57,11 @@ def _stable_json(value: Any) -> str:
 
 
 _SEARCH_TOLERANCE = 1e-12
-_CURRENT_SEARCH_VERSION = 3
+_CURRENT_SEARCH_VERSION = 4
+_ARTIFACT_REFRESH_INTERVAL = 5
+_NON_MONOTONIC_GRID_POINTS = {
+    "elastic_sigma": 41,
+}
 _SEARCH_PARAMETER_ORDER = (
     "translation_probability",
     "max_translation",
@@ -85,6 +89,13 @@ class AugmentationSearchConfig(ConfigMixin):
     candidate_samples: int = 3
     strength_step: float = 0.2
     min_strength_step: float = 0.05
+    search_every_n_epochs: int = 2
+    annealed_strength_step: float = 0.05
+    annealed_min_strength_step: float = 0.01
+    train_plateau_window: int = 10
+    train_plateau_patience: int = 30
+    train_plateau_min_improvement: float = 1e-4
+    anneal_after_plateau_fraction: float = 0.5
     max_strength: float = 1.5
 
     def validate(self) -> None:
@@ -118,6 +129,10 @@ class AugmentationSearchConfig(ConfigMixin):
             "min_strength_step must be > 0.",
         )
         _require(
+            self.search_every_n_epochs > 0,
+            "search_every_n_epochs must be > 0.",
+        )
+        _require(
             self.max_strength >= 0.0,
             "max_strength must be >= 0.",
         )
@@ -128,6 +143,42 @@ class AugmentationSearchConfig(ConfigMixin):
         _require(
             self.min_strength_step <= self.max_strength,
             "min_strength_step must be <= max_strength.",
+        )
+        _require(
+            self.annealed_strength_step > 0.0,
+            "annealed_strength_step must be > 0.",
+        )
+        _require(
+            self.annealed_min_strength_step > 0.0,
+            "annealed_min_strength_step must be > 0.",
+        )
+        _require(
+            self.annealed_strength_step <= self.strength_step,
+            "annealed_strength_step must be <= strength_step.",
+        )
+        _require(
+            self.annealed_min_strength_step <= self.min_strength_step,
+            "annealed_min_strength_step must be <= min_strength_step.",
+        )
+        _require(
+            self.annealed_min_strength_step <= self.annealed_strength_step,
+            "annealed_min_strength_step must be <= annealed_strength_step.",
+        )
+        _require(
+            self.train_plateau_window > 0,
+            "train_plateau_window must be > 0.",
+        )
+        _require(
+            self.train_plateau_patience >= 0,
+            "train_plateau_patience must be >= 0.",
+        )
+        _require(
+            self.train_plateau_min_improvement >= 0.0,
+            "train_plateau_min_improvement must be >= 0.",
+        )
+        _require(
+            0.0 <= self.anneal_after_plateau_fraction <= 1.0,
+            "anneal_after_plateau_fraction must be in [0.0, 1.0].",
         )
 
 
@@ -143,6 +194,10 @@ class AugmentationSearchState(ConfigMixin):
     last_margin_retention: float
     last_updated_parameters: list[str]
     last_event: str
+    best_train_accuracy_metric: float
+    epochs_since_train_improvement: int
+    search_frozen: bool
+    frozen_epoch: int | None
 
     def validate(self) -> None:
         _require(
@@ -173,6 +228,16 @@ class AugmentationSearchState(ConfigMixin):
             self.last_margin_retention >= 0.0,
             "last_margin_retention must be >= 0.",
         )
+        _require(
+            0.0 <= self.best_train_accuracy_metric <= 1.0,
+            "best_train_accuracy_metric must be in [0.0, 1.0].",
+        )
+        _require(
+            self.epochs_since_train_improvement >= 0,
+            "epochs_since_train_improvement must be >= 0.",
+        )
+        if self.frozen_epoch is not None:
+            _require(self.frozen_epoch >= 0, "frozen_epoch must be >= 0.")
 
 
 @dataclass
@@ -198,6 +263,145 @@ class CandidateEvaluation:
     retention: float
     mean_margin: float
     margin_retention: float
+
+
+def _is_acceptable_candidate(
+    candidate: CandidateEvaluation,
+    search_config: AugmentationSearchConfig,
+) -> bool:
+    return (
+        candidate.retention >= search_config.invariance_threshold - _SEARCH_TOLERANCE
+        and candidate.margin_retention
+        >= search_config.margin_retention_threshold - _SEARCH_TOLERANCE
+    )
+
+
+def _lerp(start: float, end: float, t: float) -> float:
+    return start + (end - start) * t
+
+
+def _effective_search_config(
+    search_config: AugmentationSearchConfig,
+    state: AugmentationSearchState,
+) -> AugmentationSearchConfig:
+    if state.search_frozen or search_config.train_plateau_patience <= 0:
+        return search_config
+
+    stale_fraction = min(
+        1.0,
+        state.epochs_since_train_improvement
+        / max(1, search_config.train_plateau_patience),
+    )
+    if stale_fraction <= search_config.anneal_after_plateau_fraction + _SEARCH_TOLERANCE:
+        return search_config
+
+    if search_config.anneal_after_plateau_fraction >= 1.0 - _SEARCH_TOLERANCE:
+        anneal_progress = 1.0
+    else:
+        anneal_progress = (
+            stale_fraction - search_config.anneal_after_plateau_fraction
+        ) / (1.0 - search_config.anneal_after_plateau_fraction)
+    anneal_progress = min(1.0, max(0.0, anneal_progress))
+
+    effective_strength_step = _lerp(
+        search_config.strength_step,
+        search_config.annealed_strength_step,
+        anneal_progress,
+    )
+    effective_min_strength_step = _lerp(
+        search_config.min_strength_step,
+        search_config.annealed_min_strength_step,
+        anneal_progress,
+    )
+    effective_strength_step = max(effective_strength_step, effective_min_strength_step)
+    return replace(
+        search_config,
+        strength_step=effective_strength_step,
+        min_strength_step=effective_min_strength_step,
+    )
+
+
+def _is_scheduled_search_epoch(
+    epoch: int,
+    search_config: AugmentationSearchConfig,
+) -> bool:
+    return (epoch - 1) % search_config.search_every_n_epochs == 0
+
+
+def _should_refresh_artifacts(
+    epoch: int,
+    *,
+    final_epoch: int,
+    refresh_interval: int = _ARTIFACT_REFRESH_INTERVAL,
+) -> bool:
+    if refresh_interval <= 1:
+        return True
+    return epoch >= final_epoch or epoch % refresh_interval == 0
+
+
+def _train_plateau_metric(
+    train_accuracies: Sequence[float],
+    search_config: AugmentationSearchConfig,
+) -> float | None:
+    if not train_accuracies:
+        return None
+    if len(train_accuracies) < search_config.train_plateau_window:
+        return float(train_accuracies[-1])
+    return float(np.mean(train_accuracies[-search_config.train_plateau_window :]))
+
+
+def update_search_train_plateau_state(
+    state: AugmentationSearchState,
+    train_accuracies: Sequence[float],
+    epoch: int,
+    search_config: AugmentationSearchConfig,
+) -> tuple[AugmentationSearchState, float | None, str | None]:
+    metric = _train_plateau_metric(train_accuracies, search_config)
+    if metric is None:
+        return state, None, None
+
+    best_train_accuracy_metric = state.best_train_accuracy_metric
+    epochs_since_train_improvement = state.epochs_since_train_improvement
+    search_frozen = state.search_frozen
+    frozen_epoch = state.frozen_epoch
+    last_event = state.last_event
+    freeze_message = None
+
+    if (
+        best_train_accuracy_metric <= _SEARCH_TOLERANCE
+        or metric
+        > best_train_accuracy_metric + search_config.train_plateau_min_improvement
+    ):
+        best_train_accuracy_metric = metric
+        epochs_since_train_improvement = 0
+    elif (
+        len(train_accuracies) >= search_config.train_plateau_window
+        and search_config.train_plateau_patience > 0
+        and not search_frozen
+    ):
+        epochs_since_train_improvement += 1
+        if epochs_since_train_improvement >= search_config.train_plateau_patience:
+            search_frozen = True
+            frozen_epoch = epoch
+            last_event = "search_train_plateau_frozen"
+            freeze_message = (
+                "[search] train plateau detected. Freezing augmentation search at "
+                f"epoch {epoch} after {epochs_since_train_improvement} stale epochs; "
+                f"best smoothed clean train accuracy: {best_train_accuracy_metric:.4f}"
+            )
+
+    return (
+        replace(
+            state,
+            best_train_accuracy_metric=best_train_accuracy_metric,
+            epochs_since_train_improvement=epochs_since_train_improvement,
+            search_frozen=search_frozen,
+            frozen_epoch=frozen_epoch,
+            last_event=last_event,
+        ),
+        metric,
+        freeze_message,
+    )
 
 
 @dataclass
@@ -255,6 +459,10 @@ def default_search_state(search_config: AugmentationSearchConfig) -> Augmentatio
         last_margin_retention=1.0,
         last_updated_parameters=[],
         last_event="init",
+        best_train_accuracy_metric=0.0,
+        epochs_since_train_improvement=0,
+        search_frozen=False,
+        frozen_epoch=None,
     )
 
 
@@ -784,6 +992,7 @@ def evaluate_invariance_candidate(
     *,
     batch_size: int,
     candidate_samples: int,
+    required_retention: float | None = None,
     seed: int,
     epoch: int,
     parameter_index: int,
@@ -801,6 +1010,13 @@ def evaluate_invariance_candidate(
     total_retained = 0
     total_examples = 0
     total_margin = 0.0
+    total_possible_examples = int(candidate_samples * anchor.labels.shape[0])
+    min_required_retained = None
+    if required_retention is not None:
+        min_required_retained = max(
+            0.0,
+            (required_retention - _SEARCH_TOLERANCE) * total_possible_examples,
+        )
 
     for sample_index in range(candidate_samples):
         sample_key = jax.random.fold_in(base_key, sample_index)
@@ -813,6 +1029,20 @@ def evaluate_invariance_candidate(
             total_retained += int(jnp.sum(preds == batch["label"]))
             total_examples += int(batch["label"].shape[0])
             total_margin += float(jnp.sum(margins))
+
+            if min_required_retained is not None:
+                remaining_examples = total_possible_examples - total_examples
+                max_possible_retained = total_retained + remaining_examples
+                if max_possible_retained < min_required_retained:
+                    mean_margin = total_margin / total_examples if total_examples else 0.0
+                    margin_retention = 1.0
+                    if anchor.mean_margin > _SEARCH_TOLERANCE and total_examples > 0:
+                        margin_retention = mean_margin / anchor.mean_margin
+                    return CandidateEvaluation(
+                        retention=max_possible_retained / total_possible_examples,
+                        mean_margin=mean_margin,
+                        margin_retention=margin_retention,
+                    )
 
     if total_examples == 0:
         return CandidateEvaluation(
@@ -842,13 +1072,6 @@ def search_parameter_frontier(
     coarse_step = search_config.strength_step
     eval_cache: dict[float, CandidateEvaluation] = {}
 
-    def _is_acceptable(candidate: CandidateEvaluation) -> bool:
-        return (
-            candidate.retention >= search_config.invariance_threshold - _SEARCH_TOLERANCE
-            and candidate.margin_retention
-            >= search_config.margin_retention_threshold - _SEARCH_TOLERANCE
-        )
-
     def _evaluate(value: float) -> CandidateEvaluation:
         normalized_value = round(_clamp_strength(value), 8)
         if normalized_value not in eval_cache:
@@ -858,9 +1081,9 @@ def search_parameter_frontier(
     best_value = _clamp_strength(current_value)
     best_eval = _evaluate(best_value)
 
-    if not _is_acceptable(best_eval) and best_value > _SEARCH_TOLERANCE:
+    if not _is_acceptable_candidate(best_eval, search_config) and best_value > _SEARCH_TOLERANCE:
         zero_eval = _evaluate(0.0)
-        if not _is_acceptable(zero_eval):
+        if not _is_acceptable_candidate(zero_eval, search_config):
             return 0.0, zero_eval
 
         low = 0.0
@@ -870,13 +1093,13 @@ def search_parameter_frontier(
         while high - low > min_step + _SEARCH_TOLERANCE:
             mid = 0.5 * (low + high)
             mid_eval = _evaluate(mid)
-            if _is_acceptable(mid_eval):
+            if _is_acceptable_candidate(mid_eval, search_config):
                 low = mid
                 best_value = mid
                 best_eval = mid_eval
             else:
                 high = mid
-    elif not _is_acceptable(best_eval):
+    elif not _is_acceptable_candidate(best_eval, search_config):
         return 0.0, best_eval
 
     candidate_value = min(1.0, best_value + coarse_step)
@@ -885,7 +1108,7 @@ def search_parameter_frontier(
 
     while True:
         candidate_eval = _evaluate(candidate_value)
-        if _is_acceptable(candidate_eval):
+        if _is_acceptable_candidate(candidate_eval, search_config):
             best_value = candidate_value
             best_eval = candidate_eval
             if best_value >= 1.0 - _SEARCH_TOLERANCE:
@@ -901,12 +1124,72 @@ def search_parameter_frontier(
         while high - best_value > min_step + _SEARCH_TOLERANCE:
             mid = 0.5 * (best_value + high)
             mid_eval = _evaluate(mid)
-            if _is_acceptable(mid_eval):
+            if _is_acceptable_candidate(mid_eval, search_config):
                 best_value = mid
                 best_eval = mid_eval
             else:
                 high = mid
         return best_value, best_eval
+
+
+def search_parameter_candidates(
+    current_value: float,
+    candidate_values: Sequence[float],
+    evaluate_candidate: Callable[[float], CandidateEvaluation],
+    search_config: AugmentationSearchConfig,
+) -> tuple[float, CandidateEvaluation]:
+    eval_cache: dict[float, CandidateEvaluation] = {}
+
+    def _evaluate(value: float) -> CandidateEvaluation:
+        normalized_value = round(_clamp_strength(value), 8)
+        if normalized_value not in eval_cache:
+            eval_cache[normalized_value] = evaluate_candidate(normalized_value)
+        return eval_cache[normalized_value]
+
+    normalized_current = round(_clamp_strength(current_value), 8)
+    normalized_candidates = sorted(
+        {
+            round(_clamp_strength(value), 8)
+            for value in (*candidate_values, normalized_current)
+        }
+    )
+    scored_candidates = [(value, _evaluate(value)) for value in normalized_candidates]
+    acceptable_candidates = [
+        (value, candidate)
+        for value, candidate in scored_candidates
+        if _is_acceptable_candidate(candidate, search_config)
+    ]
+
+    if acceptable_candidates:
+
+        def _acceptable_score(
+            item: tuple[float, CandidateEvaluation],
+        ) -> tuple[float, float, float, float]:
+            value, candidate = item
+            retention_slack = candidate.retention - search_config.invariance_threshold
+            margin_slack = (
+                candidate.margin_retention - search_config.margin_retention_threshold
+            )
+            return (
+                retention_slack**2 + margin_slack**2,
+                abs(value - normalized_current),
+                -candidate.retention,
+                -candidate.margin_retention,
+            )
+
+        return min(acceptable_candidates, key=_acceptable_score)
+
+    def _fallback_score(
+        item: tuple[float, CandidateEvaluation],
+    ) -> tuple[float, float, float]:
+        value, candidate = item
+        return (
+            candidate.retention,
+            candidate.margin_retention,
+            -abs(value - normalized_current),
+        )
+
+    return max(scored_candidates, key=_fallback_score)
 
 
 def search_augmentation_parameters(
@@ -917,6 +1200,17 @@ def search_augmentation_parameters(
     config: MnistVitAugSearchConfig,
     epoch: int,
 ) -> tuple[AugmentationSearchState, AnchorSet | None, list[ParameterSearchUpdate]]:
+    if state.search_frozen:
+        return (
+            replace(
+                state,
+                last_updated_parameters=[],
+                last_event="search_frozen",
+            ),
+            None,
+            [],
+        )
+
     max_examples_per_class = max(
         1,
         min(
@@ -952,6 +1246,7 @@ def search_augmentation_parameters(
     parameter_values = dict(state.parameter_values)
     updates: list[ParameterSearchUpdate] = []
     search_batch_size = max(1, config.training.batch_size)
+    effective_search_config = _effective_search_config(config.search, state)
 
     for parameter_index, parameter_name in enumerate(_SEARCH_PARAMETER_ORDER):
         if not _parameter_is_searchable(parameter_name, parameter_values):
@@ -973,6 +1268,7 @@ def search_augmentation_parameters(
                 candidate_augmentation,
                 batch_size=search_batch_size,
                 candidate_samples=config.search.candidate_samples,
+                required_retention=config.search.invariance_threshold,
                 seed=config.seed,
                 epoch=epoch,
                 parameter_index=parameter_index,
@@ -980,11 +1276,21 @@ def search_augmentation_parameters(
             )
 
         old_value = parameter_values[parameter_name]
-        new_value, candidate_eval = search_parameter_frontier(
-            old_value,
-            _evaluate_candidate,
-            config.search,
-        )
+        if parameter_name in _NON_MONOTONIC_GRID_POINTS:
+            num_points = _NON_MONOTONIC_GRID_POINTS[parameter_name]
+            candidate_values = np.linspace(0.0, 1.0, num_points)
+            new_value, candidate_eval = search_parameter_candidates(
+                old_value,
+                candidate_values,
+                _evaluate_candidate,
+                effective_search_config,
+            )
+        else:
+            new_value, candidate_eval = search_parameter_frontier(
+                old_value,
+                _evaluate_candidate,
+                effective_search_config,
+            )
         parameter_values[parameter_name] = new_value
         if abs(new_value - old_value) > _SEARCH_TOLERANCE:
             updates.append(
@@ -1011,6 +1317,7 @@ def search_augmentation_parameters(
         final_augmentation,
         batch_size=search_batch_size,
         candidate_samples=config.search.candidate_samples,
+        required_retention=config.search.invariance_threshold,
         seed=config.seed,
         epoch=epoch,
         parameter_index=len(_SEARCH_PARAMETER_ORDER),
@@ -1140,7 +1447,16 @@ def load_search_state(
         return default_state
 
     raw_payload = json.loads(path.read_text(encoding="utf-8"))
-    if raw_payload.get("search_version") != _CURRENT_SEARCH_VERSION:
+    raw_version = raw_payload.get("search_version")
+    if raw_version == 3 and isinstance(raw_payload.get("parameter_values"), dict):
+        payload = default_state.to_dict()
+        payload.update(raw_payload)
+        payload["search_version"] = _CURRENT_SEARCH_VERSION
+        state = AugmentationSearchState(**payload)
+        state.validate()
+        return state
+
+    if raw_version != _CURRENT_SEARCH_VERSION:
         return replace(default_state, last_event="reset_search_state")
 
     payload = default_state.to_dict()
@@ -1319,6 +1635,8 @@ def _apply_search_overrides(
         config.search.strength_step = args.strength_step
     if args.min_strength_step is not None:
         config.search.min_strength_step = args.min_strength_step
+    if args.search_every_n_epochs is not None:
+        config.search.search_every_n_epochs = args.search_every_n_epochs
     if args.max_strength is not None:
         config.search.max_strength = args.max_strength
     config.validate()
@@ -1348,6 +1666,7 @@ def parse_augsearch_args(
     parser.add_argument("--candidate-samples", type=int, default=None)
     parser.add_argument("--strength-step", type=float, default=None)
     parser.add_argument("--min-strength-step", type=float, default=None)
+    parser.add_argument("--search-every-n-epochs", type=int, default=None)
     parser.add_argument("--max-strength", type=float, default=None)
     parsed_args = parser.parse_args(args)
     parsed_args.default_onnx_output = default_onnx_output
@@ -1463,10 +1782,13 @@ def train_model(
             "Restarting the augmentation search with the frozen-model invariance strategy."
         )
 
+    final_epoch = start_epoch + config.training.num_epochs_to_train_now - 1
     for epoch in range(start_epoch, start_epoch + config.training.num_epochs_to_train_now):
         learning_rate = lr_schedule(epoch, config.training)
         weight_decay = config.training.weight_decay
         state_before = search_state
+        effective_search_config = _effective_search_config(config.search, state_before)
+        refresh_artifacts = _should_refresh_artifacts(epoch, final_epoch=final_epoch)
         augmentation_before = build_augmentation_from_search_state(
             reference_augmentation,
             state_before,
@@ -1474,14 +1796,32 @@ def train_model(
             image_height=config.model.height,
             image_width=config.model.width,
         )
-        search_state, anchor_set, search_updates = search_augmentation_parameters(
-            model,
-            train_eval_dataloader,
-            reference_augmentation,
-            search_state,
-            config,
-            epoch,
-        )
+        if state_before.search_frozen:
+            search_state, anchor_set, search_updates = search_augmentation_parameters(
+                model,
+                train_eval_dataloader,
+                reference_augmentation,
+                search_state,
+                config,
+                epoch,
+            )
+        elif _is_scheduled_search_epoch(epoch, config.search):
+            search_state, anchor_set, search_updates = search_augmentation_parameters(
+                model,
+                train_eval_dataloader,
+                reference_augmentation,
+                search_state,
+                config,
+                epoch,
+            )
+        else:
+            search_state = replace(
+                search_state,
+                last_updated_parameters=[],
+                last_event="search_skipped_interval",
+            )
+            anchor_set = None
+            search_updates = []
         augmentation_after = build_augmentation_from_search_state(
             reference_augmentation,
             search_state,
@@ -1495,32 +1835,31 @@ def train_model(
             augmentation_after,
         )
         augmentation_summary = format_augmentation_summary(augmentation_after)
+        if search_state.last_event == "search_skipped_interval":
+            search_status = "skipped; reusing current augmentation"
+        elif search_state.last_event == "search_frozen":
+            search_status = "search frozen; reusing current augmentation"
+        else:
+            search_status = (
+                f"anchor size: {search_state.last_anchor_size}, "
+                f"classes: {search_state.last_anchor_num_classes}, "
+                f"min/class: {search_state.last_anchor_min_class_count}, "
+                f"anchor margin: {search_state.last_anchor_mean_margin:.4f}, "
+                f"retention: {search_state.last_retention:.4f}, "
+                f"margin retention: {search_state.last_margin_retention:.4f}"
+            )
         print(
-            f"[search] epoch: {epoch}, anchor size: {search_state.last_anchor_size}, "
-            f"classes: {search_state.last_anchor_num_classes}, "
-            f"min/class: {search_state.last_anchor_min_class_count}, "
-            f"anchor margin: {search_state.last_anchor_mean_margin:.4f}, "
-            f"retention: {search_state.last_retention:.4f}, "
-            f"margin retention: {search_state.last_margin_retention:.4f}"
+            f"[search] epoch: {epoch}, {search_status}"
+        )
+        print(
+            f"[search] control: step {effective_search_config.strength_step:.3f}, "
+            f"min step {effective_search_config.min_strength_step:.3f}, "
+            f"stale train epochs {state_before.epochs_since_train_improvement}, "
+            f"frozen {'yes' if state_before.search_frozen else 'no'}, "
+            f"interval {config.search.search_every_n_epochs}"
         )
         print(f"[search] changes: {augmentation_changes}")
         print(f"[search] augmentation: {augmentation_summary}")
-        append_search_history_event(
-            output_dir,
-            epoch=epoch,
-            anchor_class_counts=anchor_set.class_counts if anchor_set is not None else [],
-            anchor_size=search_state.last_anchor_size,
-            anchor_mean_margin=search_state.last_anchor_mean_margin,
-            retention=search_state.last_retention,
-            margin_retention=search_state.last_margin_retention,
-            updates=search_updates,
-            augmentation_before=augmentation_before,
-            augmentation_after=augmentation_after,
-            augmentation_summary=augmentation_summary,
-            augmentation_changes=augmentation_changes,
-            state_before=state_before,
-            state_after=search_state,
-        )
 
         print(
             f"Epoch: {epoch}, learning rate: {learning_rate:.6e}, "
@@ -1551,7 +1890,13 @@ def train_model(
                 "Reduce batch_size or disable drop_last."
             )
 
-        visualize_augmented_images(last_train_batch, epoch, num_images=9, output_dir=output_dir)
+        if refresh_artifacts:
+            visualize_augmented_images(
+                last_train_batch,
+                epoch,
+                num_images=9,
+                output_dir=output_dir,
+            )
 
         train_online_metrics = metrics.compute()
         metrics_history["train_online_loss"].append(train_online_metrics["loss"].item())
@@ -1577,6 +1922,21 @@ def train_model(
             f"[train] epoch: {epoch}, clean accuracy: "
             f"{train_eval_metrics['accuracy']:.4f}, errors: {train_error_count}"
         )
+        search_state, train_plateau_metric, freeze_message = update_search_train_plateau_state(
+            search_state,
+            metrics_history["train_accuracy"],
+            epoch,
+            config.search,
+        )
+        if train_plateau_metric is not None:
+            print(
+                f"[search] train control: metric {train_plateau_metric:.4f}, "
+                f"best {search_state.best_train_accuracy_metric:.4f}, "
+                f"stale epochs {search_state.epochs_since_train_improvement}, "
+                f"frozen {'yes' if search_state.search_frozen else 'no'}"
+            )
+        if freeze_message is not None:
+            print(freeze_message)
 
         test_metrics, _ = _evaluate_dataloader(model, metrics, test_dataloader)
         metrics_history["test_loss"].append(test_metrics["loss"])
@@ -1619,14 +1979,38 @@ def train_model(
         metrics_history["search_augmentation"].append(augmentation_summary)
         metrics_history["search_event"].append(search_state.last_event)
 
-        visualize_incorrect_classifications(
-            model, test_dataloader, epoch, output_dir=output_dir
+        append_search_history_event(
+            output_dir,
+            epoch=epoch,
+            anchor_class_counts=anchor_set.class_counts if anchor_set is not None else [],
+            anchor_size=search_state.last_anchor_size,
+            anchor_mean_margin=search_state.last_anchor_mean_margin,
+            retention=search_state.last_retention,
+            margin_retention=search_state.last_margin_retention,
+            updates=search_updates,
+            augmentation_before=augmentation_before,
+            augmentation_after=augmentation_after,
+            augmentation_summary=augmentation_summary,
+            augmentation_changes=augmentation_changes,
+            state_before=state_before,
+            state_after=search_state,
         )
+
+        if refresh_artifacts:
+            visualize_incorrect_classifications(
+                model, test_dataloader, epoch, output_dir=output_dir
+            )
 
         save_augsearch_metrics(metrics_history, epoch, output_csv=metrics_csv_path)
         save_model(model, config.training.checkpoint_dir, epoch)
         save_search_state(config.training.checkpoint_dir, search_state)
-        load_and_plot_test_accuracy_metrics(metrics_csv_path, metrics_fig_path)
+        if refresh_artifacts:
+            load_and_plot_test_accuracy_metrics(metrics_csv_path, metrics_fig_path)
+        else:
+            print(
+                f"[artifacts] epoch: {epoch}, deferred visual refresh "
+                f"(every {_ARTIFACT_REFRESH_INTERVAL} epochs)."
+            )
 
     return metrics_history
 
