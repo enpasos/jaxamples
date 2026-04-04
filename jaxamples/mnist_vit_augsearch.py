@@ -328,6 +328,18 @@ def _is_scheduled_search_epoch(
     return (epoch - 1) % search_config.search_every_n_epochs == 0
 
 
+def _should_run_search_epoch(
+    epoch: int,
+    state: AugmentationSearchState,
+    search_config: AugmentationSearchConfig,
+) -> bool:
+    if state.search_frozen:
+        return True
+    if state.last_event in {"init", "reset_search_state"}:
+        return True
+    return _is_scheduled_search_epoch(epoch, search_config)
+
+
 def _should_refresh_artifacts(
     epoch: int,
     *,
@@ -1796,16 +1808,7 @@ def train_model(
             image_height=config.model.height,
             image_width=config.model.width,
         )
-        if state_before.search_frozen:
-            search_state, anchor_set, search_updates = search_augmentation_parameters(
-                model,
-                train_eval_dataloader,
-                reference_augmentation,
-                search_state,
-                config,
-                epoch,
-            )
-        elif _is_scheduled_search_epoch(epoch, config.search):
+        if _should_run_search_epoch(epoch, state_before, config.search):
             search_state, anchor_set, search_updates = search_augmentation_parameters(
                 model,
                 train_eval_dataloader,

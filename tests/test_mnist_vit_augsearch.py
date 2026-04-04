@@ -365,6 +365,20 @@ def test_is_scheduled_search_epoch_starts_at_epoch_one():
     assert mnist_vit_augsearch._is_scheduled_search_epoch(4, search_config) is True
 
 
+def test_should_run_search_epoch_forces_initial_and_reset_search_states():
+    search_config = mnist_vit_augsearch.AugmentationSearchConfig(
+        search_every_n_epochs=3,
+    )
+    init_state = mnist_vit_augsearch.default_search_state(search_config)
+    reset_state = replace(init_state, last_event="reset_search_state")
+    steady_state = replace(init_state, last_event="search_stable")
+
+    assert mnist_vit_augsearch._should_run_search_epoch(0, init_state, search_config) is True
+    assert mnist_vit_augsearch._should_run_search_epoch(0, reset_state, search_config) is True
+    assert mnist_vit_augsearch._should_run_search_epoch(0, steady_state, search_config) is False
+    assert mnist_vit_augsearch._should_run_search_epoch(1, steady_state, search_config) is True
+
+
 def test_should_refresh_artifacts_only_on_interval_and_final_epoch():
     assert (
         mnist_vit_augsearch._should_refresh_artifacts(
