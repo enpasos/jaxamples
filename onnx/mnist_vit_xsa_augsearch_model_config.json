@@ -1,0 +1,98 @@
+{
+  "model": {
+    "attention_dropout_rate": 0.1,
+    "embed_dims": [
+      32,
+      128,
+      256
+    ],
+    "embedding_dropout_rate": 0.1,
+    "embedding_type": "conv",
+    "head_dropout_rate": 0.1,
+    "head_hidden_dim": 256,
+    "height": 28,
+    "kernel_size": 3,
+    "mlp_dim": 512,
+    "mlp_dropout_rate": 0.1,
+    "num_classes": 10,
+    "num_heads": 4,
+    "num_hiddens": 256,
+    "num_layers": 4,
+    "patch_size": 4,
+    "pool_features": "cls_mean",
+    "strides": [
+      1,
+      2,
+      2
+    ],
+    "width": 28
+  },
+  "onnx": {
+    "input_params": {
+      "deterministic": true
+    },
+    "input_shapes": [
+      [
+        "B",
+        28,
+        28,
+        1
+      ]
+    ],
+    "model_name": "mnist_vit_xsa_augsearch_model",
+    "output_path": "/home/enpasos/projects/jaxamples/onnx/mnist_vit_xsa_augsearch_model.onnx"
+  },
+  "search": {
+    "anchor_examples_per_class": 256,
+    "anchor_max_examples": 2048,
+    "anchor_min_margin": 0.5,
+    "anneal_after_plateau_fraction": 0.5,
+    "annealed_min_strength_step": 0.01,
+    "annealed_strength_step": 0.05,
+    "candidate_samples": 3,
+    "invariance_threshold": 0.995,
+    "margin_retention_threshold": 0.9,
+    "max_strength": 1.5,
+    "min_strength_step": 0.05,
+    "search_every_n_epochs": 2,
+    "strength_step": 0.2,
+    "train_plateau_min_improvement": 0.0001,
+    "train_plateau_patience": 30,
+    "train_plateau_window": 10
+  },
+  "seed": 5678,
+  "training": {
+    "augmentation": {
+      "elastic_alpha": 1.2,
+      "elastic_probability": 0.3,
+      "elastic_sigma": 1.0,
+      "enable_elastic": true,
+      "enable_rect_erasing": false,
+      "enable_rotation": true,
+      "enable_scaling": true,
+      "enable_translation": true,
+      "max_rotation": 12.0,
+      "max_translation": 4.0,
+      "rect_erase_height": 2,
+      "rect_erase_width": 20,
+      "rect_erasing_probability": 0.0,
+      "rotation_probability": 0.7,
+      "scale_max_x": 1.1,
+      "scale_max_y": 1.1,
+      "scale_min_x": 0.9,
+      "scale_min_y": 0.9,
+      "scaling_probability": 0.6,
+      "translation_probability": 0.8
+    },
+    "base_learning_rate": 0.0001,
+    "batch_size": 64,
+    "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/mnist_vit_xsa_augsearch_checkpoints",
+    "data_dir": "./data",
+    "enable_training": true,
+    "num_epochs_to_train_now": 700,
+    "output_dir": "/home/enpasos/projects/jaxamples/output/mnist_vit_xsa_augsearch",
+    "start_epoch": 0,
+    "warmup_epochs": 5,
+    "weight_decay": 0.0001
+  }
+}

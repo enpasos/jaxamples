@@ -89,9 +89,9 @@
     "checkpoint_dir": "/home/enpasos/projects/jaxamples/data/mnist_vit_augsearch_checkpoints",
     "data_dir": "./data",
     "enable_training": true,
-    "num_epochs_to_train_now": 700,
+    "num_epochs_to_train_now": 1000,
     "output_dir": "/home/enpasos/projects/jaxamples/output/mnist_vit_augsearch",
-    "start_epoch": 0,
+    "start_epoch": 35,
     "warmup_epochs": 5,
     "weight_decay": 0.0001
   }
